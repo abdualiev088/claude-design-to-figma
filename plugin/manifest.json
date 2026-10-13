@@ -1,0 +1,13 @@
+{
+  "name": "Claude Design → Figma",
+  "id": "claude-design-to-figma-local",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Designs exported from Claude Design load fonts, images and scripts from CDNs (Google Fonts, unpkg, jsdelivr, etc.)."
+  }
+}
