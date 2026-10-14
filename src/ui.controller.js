@@ -280,7 +280,7 @@
         else notes += '<div class="note">This design could only be copied as a flat picture (SVG), so there is no auto layout. Try exporting it from Claude Design as a .zip.</div>';
         show('svgActions', true);
         $('copyLabel').textContent = 'Copy for Figma';
-        setStatus('Ready — ' + what + '. Copy it and paste into Figma, or download the file and drag it in.', 'ok');
+        setStatus('Ready — ' + what + '. Copy it and paste into Figma.', 'ok');
       }
       $('doneStats').innerHTML = '<span><b>' + r.frames + '</b> ' + (r.frames === 1 ? 'frame' : 'frames') + '</span><span><b>' + r.total + '</b> layers</span>' + (r.failed ? '<span><b>' + r.failed + '</b> skipped</span>' : '');
       var miss = Object.keys(r.missing || {});

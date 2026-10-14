@@ -285,15 +285,23 @@
         if (ks.length !== 1) continue;
         var c = ks[0];
         if (c.type !== 'FRAME' || c.stackPositioning === 'ABSOLUTE') continue;
-        // a wrapper with only a background is fine to fold when the child's own opaque, square background hides it
-        if (hasLook(n) && !(fillsOnly(n) && covers(c))) continue;
+        // a wrapper with only a background is fine to fold when the child's own opaque, square background hides it;
+        // a plain child (no look of its own) can always hand its layout and children up to a styled parent
+        var plainChild = !hasLook(c) && c.frameMaskDisabled !== false;
+        if (hasLook(n) && !plainChild && !(fillsOnly(n) && covers(c))) continue;
         var t = c.transform || {};
         if (Math.abs(t.m02 || 0) > 0.5 || Math.abs(t.m12 || 0) > 0.5 || Math.abs((t.m00 === undefined ? 1 : t.m00) - 1) > 1e-3 || Math.abs(t.m01 || 0) > 1e-3) continue;
         if (Math.abs(c.size.x - n.size.x) > 0.5 || Math.abs(c.size.y - n.size.y) > 0.5) continue;
         // fold c into n: n keeps its place in the parent, takes c's look, layout and children
         var clip = n.frameMaskDisabled === false;
-        Object.keys(n).forEach(function (k) { if (!CHILD_PROPS[k] && k !== '__gone') delete n[k]; });
-        Object.keys(c).forEach(function (k) { if (!CHILD_PROPS[k]) n[k] = c[k]; });
+        if (plainChild && hasLook(n)) {
+          // keep the parent's look, take the child's auto layout
+          Object.keys(n).forEach(function (k) { if (/^stack/.test(k) && !CHILD_PROPS[k]) delete n[k]; });
+          Object.keys(c).forEach(function (k) { if (/^stack/.test(k) && !CHILD_PROPS[k]) n[k] = c[k]; });
+        } else {
+          Object.keys(n).forEach(function (k) { if (!CHILD_PROPS[k] && k !== '__gone') delete n[k]; });
+          Object.keys(c).forEach(function (k) { if (!CHILD_PROPS[k]) n[k] = c[k]; });
+        }
         if (clip) n.frameMaskDisabled = false;
         if (c.opacity !== undefined) n.opacity = (n.opacity === undefined ? 1 : n.opacity) * c.opacity;
         if (GENERIC.test(n.name || '') && !GENERIC.test(c.name || '')) n.name = c.name;
