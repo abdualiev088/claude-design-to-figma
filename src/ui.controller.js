@@ -161,7 +161,7 @@
     return w;
   }
 
-  var lastSvg = '', lastSvgName = 'design.svg';
+  var lastSvg = '', lastSvgName = 'design.svg', lastFig = null;
 
   $('go').onclick = async function () {
     var opts = { vh: Math.max(300, +$('optVH').value || 900), wait: Math.max(0, +$('optWait').value || 0), autoLayout: $('optAL').checked, expand: $('optExpand').checked, first: $('optFirst').checked, svgLines: !IN_FIGMA };
@@ -177,7 +177,7 @@
     $('step3').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     var x = 0, missing = {}, total = 0, frames = 0, failed = 0, tries = 0, canvasNote = false, lastErr = '';
-    var svgRoots = [], svgImages = {}, imgSeq = 0;
+    var svgRoots = [], svgImages = {}, imgSeq = 0, natFrames = []; lastFig = null;
     var jobsTotal = pages.length * ws.length, jobsDone = 0;
 
     // Rename image ids so results from several captures can share one SVG
@@ -210,6 +210,7 @@
           if (!IN_FIGMA) {
             mergeImages(res);
             items.forEach(function (it) { svgRoots.push({ tree: it.tree, x: x + it.x, y: it.y }); });
+            try { natFrames = natFrames.concat(F2FNative.frames(res, x, label)); } catch (e) { console.warn('native frames', e); }
             frames += items.length;
             total += res.stats.frames + res.stats.texts + res.stats.svgs;
           } else {
@@ -238,6 +239,12 @@
       await sleep(30);
       lastSvg = F2FSvg.render(svgRoots, svgImages);
       lastSvgName = (pages[0].path.replace(/\.html?$/i, '').split('/').pop() || 'design') + '.svg';
+      if (natFrames.length) {
+        setStatus('Building Figma frames and auto layout…');
+        try { lastFig = await F2FNative.convert(natFrames, pages[0].path.split('/').pop()); }
+        catch (e) { console.error('native convert failed', e); lastFig = null; }
+      }
+      $('stage').innerHTML = '';
     }
     setPhase(3); setBar(1);
     await sleep(250);
@@ -268,7 +275,9 @@
         setStatus('Done — ' + r.total + ' layers in ' + what + '.', 'ok');
       } else {
         $('doneTitle').textContent = 'Ready to paste';
-        $('doneSum').textContent = 'Copy it, then paste it into any Figma file.';
+        $('doneSum').textContent = lastFig ? 'Copy it, then paste into any Figma file: real frames, auto layout and editable text.' : 'Copy it, then paste it into any Figma file.';
+        if (lastFig) { var mf = Object.keys(F2FNative.missingFonts); if (mf.length) notes += '<div class="note"><b>' + (mf.length === 1 ? 'A font isn’t' : 'Some fonts aren’t') + ' on Google Fonts:</b> ' + mf.map(function (k) { return '“' + esc(k) + '”'; }).join(', ') + '. Text keeps its layout; install the font if Figma shows it as missing.</div>'; }
+        else notes += '<div class="note">This design could only be copied as a flat picture (SVG), so there is no auto layout. Try exporting it from Claude Design as a .zip.</div>';
         show('svgActions', true);
         $('copyLabel').textContent = 'Copy for Figma';
         setStatus('Ready — ' + what + '. Copy it and paste into Figma, or download the file and drag it in.', 'ok');
@@ -291,9 +300,23 @@
 
   $('copySvg').onclick = function () {
     var ok = function () { $('copyLabel').textContent = 'Copied!'; setStatus('Copied. Now open Figma and press ⌘V (Ctrl+V) on the canvas.', 'ok'); toast('Copied. Now press ⌘V in Figma'); setTimeout(function () { $('copyLabel').textContent = 'Copy again'; }, 1800); };
-    function fallback() { var t = document.createElement('textarea'); t.value = lastSvg; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy') ? ok() : bad(); } catch (e) { bad(); } t.remove(); }
     function bad() { toast('Your browser blocked copying. Use the .svg button instead'); }
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(lastSvg).then(ok, fallback); else fallback();
+    // Native Figma layers when available, otherwise SVG text.
+    var html = lastFig && lastFig.html, text = html ? '' : lastSvg;
+    var done = false;
+    function onCopy(e) {
+      if (html) { e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', ''); }
+      else e.clipboardData.setData('text/plain', text);
+      e.preventDefault(); done = true;
+    }
+    document.addEventListener('copy', onCopy, true);
+    try { document.execCommand('copy'); } catch (e) {}
+    document.removeEventListener('copy', onCopy, true);
+    if (done) return ok();
+    if (html && window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+      navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([''], { type: 'text/plain' }) })]).then(ok, bad);
+    } else if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, bad);
+    else bad();
   };
   $('dlSvg').onclick = function () {
     var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lastSvg], { type: 'image/svg+xml' })); a.download = lastSvgName; document.body.appendChild(a); a.click(); a.remove();
