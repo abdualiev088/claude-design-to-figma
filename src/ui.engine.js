@@ -293,7 +293,7 @@
         if (Math.abs(t.m02 || 0) > 0.5 || Math.abs(t.m12 || 0) > 0.5 || Math.abs((t.m00 === undefined ? 1 : t.m00) - 1) > 1e-3 || Math.abs(t.m01 || 0) > 1e-3) continue;
         if (Math.abs(c.size.x - n.size.x) > 0.5 || Math.abs(c.size.y - n.size.y) > 0.5) continue;
         // fold c into n: n keeps its place in the parent, takes c's look, layout and children
-        var clip = n.frameMaskDisabled === false;
+        var clip = n.frameMaskDisabled === false, keepEls = (n.__els || []).concat(c.__els || []);
         if (plainChild && hasLook(n)) {
           // keep the parent's look, take the child's auto layout
           Object.keys(n).forEach(function (k) { if (/^stack/.test(k) && !CHILD_PROPS[k]) delete n[k]; });
@@ -305,6 +305,7 @@
         if (clip) n.frameMaskDisabled = false;
         if (c.opacity !== undefined) n.opacity = (n.opacity === undefined ? 1 : n.opacity) * c.opacity;
         if (GENERIC.test(n.name || '') && !GENERIC.test(c.name || '')) n.name = c.name;
+        n.__els = keepEls;
         (kids[key(c.guid)] || []).forEach(function (g) { g.parentIndex = { guid: n.guid, position: g.parentIndex.position }; });
         c.__gone = true; changed++; again = true;
         rebuild();
@@ -320,6 +321,252 @@
     return changed;
   }
 
+
+  // ---------- link layers back to the page ----------
+  function gkey(g) { return g.sessionID + ':' + g.localID; }
+  function treeOf(nc) {
+    var byId = {}, kids = {};
+    nc.forEach(function (n) { if (!n.__gone) byId[gkey(n.guid)] = n; });
+    nc.forEach(function (n) { if (n.__gone || !n.parentIndex) return; (kids[gkey(n.parentIndex.guid)] = kids[gkey(n.parentIndex.guid)] || []).push(n); });
+    Object.keys(kids).forEach(function (k) { kids[k].sort(function (a, b) { return a.parentIndex.position < b.parentIndex.position ? -1 : a.parentIndex.position > b.parentIndex.position ? 1 : 0; }); });
+    return { byId: byId, kids: function (n) { return kids[gkey(n.guid)] || []; }, parent: function (n) { return n.parentIndex ? byId[gkey(n.parentIndex.guid)] : null; } };
+  }
+  function attachElements(doc, trace, frames) {
+    if (!trace || !trace.entries) return;
+    var nc = doc.nodeChanges, t = treeOf(nc);
+    var canvas = nc.filter(function (n) { return n.type === 'CANVAS'; })[0];
+    var tops = canvas ? t.kids(canvas) : [];
+    var rootFor = {};
+    tops.forEach(function (top, i) {
+      var f = frames.filter(function (fr) { return fr.name === top.name; })[0] || frames[i];
+      if (f) rootFor[gkey(top.guid)] = f.element;
+    });
+    function topOf(n) { var p = n; while (p && p.parentIndex && t.parent(p) && t.parent(p).type !== 'CANVAS') p = t.parent(p); return p; }
+    trace.entries.forEach(function (e) {
+      var n = t.byId[gkey(e.guid)]; if (!n) return;
+      var top = topOf(n), root = top && rootFor[gkey(top.guid)]; if (!root) return;
+      var path = e.domPath.replace(/::text\[\d+\]$/, '');
+      var el = null;
+      try { el = path === ':scope' ? root : root.querySelector(path); } catch (err) { el = null; }
+      if (el) n.__els = (n.__els || []).concat([el]);
+    });
+  }
+
+  // ---------- auto layout for every remaining frame ----------
+  // Frames the converter left with free positioning get auto layout too: the longest run of children that
+  // sits in a clean row or column (same spacing, same alignment) flows; anything else rides along as an
+  // absolutely positioned layer, so nothing moves.
+  function box(k) {
+    var t = k.transform || {};
+    return { x: t.m02 || 0, y: t.m12 || 0, w: k.size ? k.size.x : 0, h: k.size ? k.size.y : 0, rot: Math.abs(t.m01 || 0) > 1e-3 || Math.abs(t.m10 || 0) > 1e-3 };
+  }
+  function isPlainFrame(k) { return k.type === 'FRAME' && !hasLook(k) && k.frameMaskDisabled !== false; }
+  // Grow a look-less frame on one side without moving anything inside it (absorbs uneven spacing).
+  function grow(k, side, d, t) {
+    if (d <= 0) return;
+    var tr = k.transform = Object.assign({ m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 }, k.transform || {});
+    var vert = side === 'top' || side === 'bottom', lead = side === 'top' || side === 'left';
+    if (vert) k.size = { x: k.size.x, y: k.size.y + d }; else k.size = { x: k.size.x + d, y: k.size.y };
+    if (lead) {
+      if (vert) tr.m12 -= d; else tr.m02 -= d;
+      t.kids(k).forEach(function (c) { var ct = c.transform = Object.assign({ m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 }, c.transform || {}); if (vert) ct.m12 += d; else ct.m02 += d; });
+    }
+    if (k.stackMode && k.stackMode !== 'NONE') {
+      var f = { top: 'stackVerticalPadding', bottom: 'stackPaddingBottom', left: 'stackHorizontalPadding', right: 'stackPaddingRight' }[side];
+      k[f] = (k[f] || 0) + d;
+      if (k.stackPrimarySizing === 'RESIZE_TO_FIT' || k.stackCounterSizing === 'RESIZE_TO_FIT') { /* hugging frames grow with the padding */ }
+    }
+  }
+  // Put a layer in a look-less auto layout frame whose padding carries the extra space on one side.
+  function wrapWithPadding(k, side, d, ctx) {
+    var b = box(k), vert = side === 'top' || side === 'bottom';
+    var w = {
+      guid: { sessionID: k.guid.sessionID, localID: ++ctx.maxId }, phase: 'CREATED',
+      parentIndex: { guid: k.parentIndex.guid, position: k.parentIndex.position },
+      type: 'FRAME', name: 'Container', visible: true, opacity: 1,
+      size: { x: b.w + (vert ? 0 : d), y: b.h + (vert ? d : 0) },
+      transform: { m00: 1, m01: 0, m02: b.x - (side === 'left' ? d : 0), m10: 0, m11: 1, m12: b.y - (side === 'top' ? d : 0) },
+      cornerRadius: 0, strokeWeight: 0, strokeAlign: 'INSIDE', strokeJoin: 'MITER', fillPaints: [], strokePaints: [], effects: [],
+      frameMaskDisabled: true, stackMode: vert ? 'VERTICAL' : 'HORIZONTAL', stackSpacing: 0,
+      stackVerticalPadding: side === 'top' ? d : 0, stackPaddingBottom: side === 'bottom' ? d : 0,
+      stackHorizontalPadding: side === 'left' ? d : 0, stackPaddingRight: side === 'right' ? d : 0,
+      stackPrimarySizing: 'FIXED', stackCounterSizing: 'FIXED', stackPrimaryAlignItems: 'MIN', stackCounterAlignItems: 'MIN'
+    };
+    ['stackChildAlignSelf', 'stackChildPrimaryGrow'].forEach(function (f) { if (f in k) { w[f] = k[f]; delete k[f]; } });
+    k.parentIndex = { guid: w.guid, position: '!' };
+    k.transform = Object.assign({}, k.transform || { m00: 1, m01: 0, m10: 0, m11: 1 }, { m02: side === 'left' ? d : 0, m12: side === 'top' ? d : 0 });
+    ctx.inserts.push({ before: k, node: w });
+    return w;
+  }
+  function layoutRest(doc) {
+    var nc = doc.nodeChanges, t = treeOf(nc), tol = 1.5;
+    var ctx = { maxId: Math.max.apply(null, nc.map(function (n) { return n.guid.localID; })), inserts: [] };
+    nc.forEach(function (n) {
+      if (n.__gone || n.type !== 'FRAME' || (n.stackMode && n.stackMode !== 'NONE')) return;
+      var ks = t.kids(n); if (!ks.length) return;
+      if (ks.every(function (k) { return /^(VECTOR|ELLIPSE|BOOLEAN_OPERATION|LINE|STAR|REGULAR_POLYGON)$/.test(k.type); })) return; // icon artwork stays as drawn
+      var W = n.size.x, H = n.size.y;
+      var cand = ks.filter(function (k) {
+        var b = box(k);
+        return k.stackPositioning !== 'ABSOLUTE' && !b.rot && b.x >= -0.5 && b.y >= -0.5;
+      });
+      if (!cand.length) return;
+      var plans = [true, false].map(function (v) {
+        var st = function (k) { var b = box(k); return v ? b.y : b.x; }, en = function (k) { var b = box(k); return v ? b.y + b.h : b.x + b.w; };
+        var lo = function (k) { var b = box(k); return v ? b.x : b.y; }, hi = function (k) { var b = box(k); return (v ? W : H) - (v ? b.x + b.w : b.y + b.h); };
+        // main axis: everything that doesn't overlap the previous item flows
+        var run = [], last = -Infinity;
+        cand.slice().sort(function (a, b) { return st(a) - st(b); }).forEach(function (k) { if (st(k) >= last - 0.5) { run.push(k); last = en(k); } });
+        // counter axis: the most common alignment wins
+        var groups = [];
+        run.forEach(function (k) {
+          var full = v ? W : H, size = full - lo(k) - hi(k);
+          [['MIN', lo(k)], ['MAX', hi(k)], ['CENTER', lo(k) + size / 2]].forEach(function (pair) {
+            var g = groups.filter(function (gr) { return gr.mode === pair[0] && Math.abs(gr.v - pair[1]) <= tol; })[0];
+            if (!g) groups.push(g = { mode: pair[0], v: pair[1], n: 0 });
+            g.n++;
+          });
+        });
+        groups.sort(function (a, b) { return b.n - a.n || (a.mode === 'MIN' ? -1 : b.mode === 'MIN' ? 1 : a.mode === 'CENTER' ? -1 : 1); });
+        var g = groups[0], fits = 0, abs = [];
+        if (g.mode === 'MIN') g.v = Math.min.apply(null, run.map(lo).filter(function (x) { return x >= g.v - tol; }).concat([g.v]));
+        if (g.mode === 'MAX') g.v = Math.min.apply(null, run.map(hi).filter(function (x) { return x >= g.v - tol; }).concat([g.v]));
+        var fixes = [];
+        run.forEach(function (k) {
+          var d = g.mode === 'MIN' ? lo(k) - g.v : g.mode === 'MAX' ? hi(k) - g.v : (lo(k) + ((v ? W : H) - lo(k) - hi(k)) / 2) - g.v;
+          if (Math.abs(d) <= tol) { fits++; return; }
+          if (g.mode !== 'CENTER' && d > 0) { fixes.push([k, g.mode === 'MIN' ? (v ? 'left' : 'top') : (v ? 'right' : 'bottom'), d]); fits++; return; }
+          abs.push(k);
+        });
+        return { v: v, run: run.filter(function (k) { return abs.indexOf(k) < 0; }), abs: abs, g: g, fixes: fixes, score: fits * 10 + (v === (H >= W) ? 1 : 0), st: st, en: en, lo: lo, hi: hi };
+      });
+      var P = plans[0].score >= plans[1].score ? plans[0] : plans[1], v = P.v;
+      var run = P.run.slice();
+      P.fixes.forEach(function (f) {
+        if (isPlainFrame(f[0])) grow(f[0], f[1], f[2], t);
+        else { var w = wrapWithPadding(f[0], f[1], f[2], ctx); run[run.indexOf(f[0])] = w; }
+      });
+      // main axis spacing: one gap for all; uneven extra space is absorbed by a look-less neighbour's padding,
+      // or by a padded wrapper around the next item
+      var changed = true;
+      while (changed) {
+        changed = false;
+        var gaps = []; for (var i = 1; i < run.length; i++) gaps.push(P.st(run[i]) - P.en(run[i - 1]));
+        var gap = gaps.length ? Math.max(0, Math.min.apply(null, gaps)) : 0;
+        for (i = 1; i < run.length; i++) {
+          var extra = P.st(run[i]) - P.en(run[i - 1]) - gap;
+          if (extra <= 0.5) continue;
+          if (isPlainFrame(run[i])) grow(run[i], v ? 'top' : 'left', extra, t);
+          else if (isPlainFrame(run[i - 1])) grow(run[i - 1], v ? 'bottom' : 'right', extra, t);
+          else { run[i] = wrapWithPadding(run[i], v ? 'top' : 'left', extra, ctx); changed = true; break; }
+        }
+      }
+      gaps = []; for (i = 1; i < run.length; i++) gaps.push(P.st(run[i]) - P.en(run[i - 1]));
+      gap = gaps.length ? Math.max(0, gaps.reduce(function (a, b) { return a + b; }, 0) / gaps.length) : 0;
+      var full = v ? W : H, padStart = Math.max(0, P.st(run[0])), padEnd = Math.max(0, (v ? H : W) - P.en(run[run.length - 1]));
+      var cStart, cEnd, g = P.g;
+      if (g.mode === 'MIN') { cStart = g.v; cEnd = Math.min.apply(null, run.map(P.hi)); }
+      else if (g.mode === 'MAX') { cEnd = g.v; cStart = Math.min.apply(null, run.map(P.lo)); }
+      else { cStart = g.v <= full / 2 ? 0 : 2 * g.v - full; cEnd = g.v <= full / 2 ? full - 2 * g.v : 0; }
+      cStart = Math.max(0, cStart); cEnd = Math.max(0, cEnd);
+      n.stackMode = v ? 'VERTICAL' : 'HORIZONTAL';
+      n.stackSpacing = Math.round(gap * 100) / 100;
+      n.stackPrimarySizing = 'FIXED'; n.stackCounterSizing = 'FIXED';
+      n.stackPrimaryAlignItems = 'MIN'; n.stackCounterAlignItems = g.mode;
+      if (v) { n.stackVerticalPadding = padStart; n.stackPaddingBottom = padEnd; n.stackHorizontalPadding = cStart; n.stackPaddingRight = cEnd; }
+      else { n.stackHorizontalPadding = padStart; n.stackPaddingRight = padEnd; n.stackVerticalPadding = cStart; n.stackPaddingBottom = cEnd; }
+      var inner = full - cStart - cEnd, inRun = {};
+      run.forEach(function (k) {
+        inRun[gkey(k.guid)] = 1;
+        var b = box(k), sz = v ? b.w : b.h;
+        if (k.type === 'FRAME' && Math.abs(sz - inner) <= 0.5 && Math.abs(P.lo(k) - cStart) <= 0.5) k.stackChildAlignSelf = 'STRETCH';
+      });
+      ks.forEach(function (k) { if (!inRun[gkey(k.guid)] && k.parentIndex && gkey(k.parentIndex.guid) === gkey(n.guid)) k.stackPositioning = 'ABSOLUTE'; });
+      // flow order follows position on the main axis; absolute layers keep their stacking slots
+      var slots = run.map(function (k) { return k.parentIndex.position; }).sort();
+      run.forEach(function (k, idx) { k.parentIndex = { guid: k.parentIndex.guid, position: slots[idx] }; });
+    });
+    ctx.inserts.forEach(function (ins) { var i = nc.indexOf(ins.before); nc.splice(i < 0 ? nc.length : i, 0, ins.node); });
+  }
+
+  // ---------- layer names ----------
+  function clip(s, n) { s = String(s || '').replace(/\u00AD/g, '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trim() + '…' : s; }
+  function nameLayers(doc) {
+    var nc = doc.nodeChanges, t = treeOf(nc);
+    var GEN = /^(container|frame|div|group|wrapper|span|box|unnamed)$/i;
+    function els(n) { return n.__els || []; }
+    function tagSet(n) { return els(n).map(function (e) { return (e.tagName || '').toLowerCase(); }); }
+    function attr(n, a) { for (var i = 0; i < els(n).length; i++) { var v = els(n)[i].getAttribute && els(n)[i].getAttribute(a); if (v) return v; } return ''; }
+    function texts(n, out) { out = out || []; t.kids(n).forEach(function (k) { if (k.type === 'TEXT') out.push(k); else texts(k, out); }); return out; }
+    function firstText(n) { var ts = texts(n); return ts.length ? clip(ts[0].textData ? ts[0].textData.characters : ts[0].name, 24) : ''; }
+    function heading(n) {
+      var ts = texts(n); var h = ts.filter(function (x) { return els(x).some(function (e) { return /^h[1-6]$/i.test(e.tagName); }); })[0];
+      if (!h) { var big = ts.slice().sort(function (a, b) { return (b.fontSize || 0) - (a.fontSize || 0); })[0]; if (big && ts.length > 1 && big.fontSize >= 16) h = big; }
+      return h ? clip(h.textData ? h.textData.characters : h.name, 24) : '';
+    }
+    function look(n) { return hasLook(n); }
+    function radius(n) { return n.cornerRadius || n.rectangleTopLeftCornerRadius || 0; }
+    function isIcon(n) { return n.name === 'Icon'; }
+    function similar(ks) {
+      if (ks.length < 3) return false;
+      var w = ks[0].size.x, h = ks[0].size.y;
+      return ks.every(function (k) { return k.type === ks[0].type && Math.abs(k.size.x - w) <= 2 && Math.abs(k.size.y - h) <= 2; });
+    }
+    var bottomOf = {};
+    var canvas = nc.filter(function (n) { return n.type === 'CANVAS'; })[0];
+    // positions relative to each artboard, to spot top/bottom bars
+    function absY(n) { var y = 0, p = n; while (p && p.type !== 'CANVAS' && t.parent(p) && t.parent(p).type !== 'CANVAS') { y += (p.transform ? p.transform.m12 : 0); p = t.parent(p); } return { y: y, top: p }; }
+    void bottomOf; void canvas;
+    nc.forEach(function (n) {
+      if (n.__gone || n.type !== 'FRAME' || !n.parentIndex || !t.parent(n) || t.parent(n).type === 'CANVAS') return;
+      var ks = t.kids(n), tags = tagSet(n), label = attr(n, 'aria-label') || attr(n, 'title') || attr(n, 'alt');
+      var txt = firstText(n), head = heading(n), base = null, detail = '';
+      var generic = GEN.test(n.name || '') || n.name === 'Container';
+      var has = function (tg) { return tags.indexOf(tg) > -1; };
+      var pos = absY(n), artH = pos.top && pos.top.size ? pos.top.size.y : 0, artW = pos.top && pos.top.size ? pos.top.size.x : 0;
+      var wide = artW && n.size.x >= artW - 2;
+      if (isIcon(n)) return;
+      if (has('button') || n.name === 'Button') {
+        var only = ks.length === 1 && isIcon(ks[0]);
+        base = only ? 'Icon button' : 'Button'; detail = label || txt;
+      } else if (has('nav') || n.name === 'Navigation') {
+        base = wide && artH && pos.y + n.size.y >= artH - 2 ? 'Tab bar' : 'Navigation';
+      } else if (has('header') || n.name === 'Header') { base = 'Header'; detail = head; }
+      else if (has('footer') || n.name === 'Footer') base = 'Footer';
+      else if (has('main')) base = 'Content';
+      else if (has('section') || has('article') || n.name === 'Section') { base = 'Section'; detail = head; }
+      else if ((has('input') || has('textarea') || has('select')) && !has('label')) { base = has('select') ? 'Select' : 'Input'; detail = ''; }
+      else if (has('label') && els(n).some(function (e) { return e.querySelector && e.querySelector('input,textarea,select'); }) || has('input') || has('textarea')) {
+        var inp = null; els(n).forEach(function (e) { inp = inp || (e.matches && e.matches('input,textarea') ? e : e.querySelector && e.querySelector('input,textarea')); });
+        var ph = inp ? (inp.getAttribute('placeholder') || '') : '';
+        base = inp && (inp.type === 'search' || /поиск|search|найти|искать/i.test(ph + label)) ? 'Search field' : 'Input field';
+      }
+      else if (has('a')) { base = look(n) ? 'Button' : 'Link'; detail = label || txt; }
+      else if (has('ul') || has('ol')) base = 'List';
+      else if (has('li')) { base = 'List item'; detail = txt; }
+      else if (has('img') || (n.fillPaints || []).some(function (p) { return p.type === 'IMAGE'; })) { base = 'Image'; detail = attr(n, 'alt'); }
+      else if (!generic) return; // the converter already gave it a meaningful name
+      if (!base) {
+        var allText = ks.length && ks.every(function (k) { return k.type === 'TEXT'; });
+        var r = radius(n), minSide = Math.min(n.size.x, n.size.y);
+        if (look(n) && ks.length === 1 && isIcon(ks[0])) base = r >= minSide / 2 - 1 ? 'Icon circle' : 'Icon tile';
+        else if (look(n) && ks.length === 1 && ks[0].type === 'TEXT' && n.size.y <= 40) { base = r >= n.size.y / 2 - 1 ? 'Chip' : 'Tag'; detail = txt; }
+        else if (look(n) && r > 0 && texts(n).length >= 1 && ks.length >= 2) { base = 'Card'; detail = head || txt; }
+        else if (similar(ks)) base = n.stackWrap === 'WRAP' ? 'Grid' : n.stackMode === 'HORIZONTAL' ? 'Row' : 'List';
+        else if (allText && ks.length >= 2) { base = 'Text block'; detail = txt; }
+        else if (allText && texts(n).some(function (x) { return els(x).some(function (e) { return /^h[1-6]$/i.test(e.tagName); }); })) { base = 'Title'; detail = txt; }
+        else if (allText) { base = 'Label'; detail = txt; }
+        else if (!ks.length && !look(n)) base = 'Spacer';
+        else if (head && n.stackMode === 'HORIZONTAL' && n.size.y <= 64) { base = 'Title row'; detail = head; }
+        else if (head && texts(n).length > 1) { base = 'Group'; detail = head; }
+        else if (look(n)) base = wide ? 'Bar' : 'Box';
+        else base = n.stackMode === 'HORIZONTAL' ? 'Row' : n.stackMode === 'VERTICAL' ? 'Column' : 'Group';
+      }
+      detail = clip(detail, 24);
+      n.name = detail && detail !== base ? base + ' · ' + detail : base;
+    });
+  }
+
   var F2FNative = window.F2FNative = {
     tidy: tidy,
     missingFonts: {},
@@ -329,10 +576,10 @@
       F2FNative.missingFonts = {};
       var chars = textChars(frames);
       var fallback = F2FFigit.createFontsourceLoader();
-      var conv = F2FFigit.createFigmaConverter({ fontLoader: googleFontLoader(chars, fallback) });
+      var conv = F2FFigit.createFigmaConverter({ fontLoader: googleFontLoader(chars, fallback), trace: true });
       var res = await conv.convert(frames.length > 1 ? { frames: frames, canvasName: canvasName || 'Claude Design' } : frames[0]);
       // Fonts Figma doesn't know by that name (system-ui, sans-serif, Segoe UI…) get the stand-in's name.
-      var renamed = false;
+      var renamed = false; void renamed;
       (function walk(o) {
         if (!o || typeof o !== 'object') return;
         if (ArrayBuffer.isView(o)) return;
@@ -342,8 +589,13 @@
         }
         for (var k in o) if (o[k] && typeof o[k] === 'object') walk(o[k]);
       })(res.document.nodeChanges);
-      var cleaned = tidy(res.document);
-      var html = renamed || cleaned ? F2FFigit.composeClipboardHtml(F2FFigit.encodeFigmaData(res.document).base64) : res.toClipboardHtml();
+      try { attachElements(res.document, res.trace, frames); } catch (e) { console.warn('trace', e); }
+      tidy(res.document);
+      try { layoutRest(res.document); } catch (e) { console.warn('layout', e); }
+      tidy(res.document);
+      try { nameLayers(res.document); } catch (e) { console.warn('names', e); }
+      res.document.nodeChanges.forEach(function (n) { Object.keys(n).forEach(function (k) { if (k.indexOf('__') === 0) delete n[k]; }); });
+      var html = F2FFigit.composeClipboardHtml(F2FFigit.encodeFigmaData(res.document).base64);
       return { html: html, document: res.document };
     }
   };
