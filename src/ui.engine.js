@@ -398,6 +398,13 @@
     ctx.inserts.push({ before: k, node: w });
     return w;
   }
+  // Layers the page itself positions absolutely (badges, overlays) never join the flow.
+  function outOfFlow(k) {
+    if (k.type === 'TEXT') return false; // a text layer's element is its owner, not the text itself
+    return (k.__els || []).some(function (el) {
+      try { var p = el.ownerDocument.defaultView.getComputedStyle(el).position; return p === 'absolute' || p === 'fixed'; } catch (e) { return false; }
+    });
+  }
   function layoutRest(doc) {
     var nc = doc.nodeChanges, t = treeOf(nc), tol = 1.5;
     var ctx = { maxId: Math.max.apply(null, nc.map(function (n) { return n.guid.localID; })), inserts: [] };
@@ -408,9 +415,16 @@
       var W = n.size.x, H = n.size.y;
       var cand = ks.filter(function (k) {
         var b = box(k);
-        return k.stackPositioning !== 'ABSOLUTE' && !b.rot && b.x >= -0.5 && b.y >= -0.5;
+        return k.stackPositioning !== 'ABSOLUTE' && !b.rot && b.x >= -0.5 && b.y >= -0.5 && !outOfFlow(k);
       });
-      if (!cand.length) return;
+      if (!cand.length) {
+        // nothing flows: still an auto layout frame, every child rides along absolutely
+        n.stackMode = 'VERTICAL'; n.stackSpacing = 0; n.stackPrimarySizing = 'FIXED'; n.stackCounterSizing = 'FIXED';
+        n.stackPrimaryAlignItems = 'MIN'; n.stackCounterAlignItems = 'MIN';
+        n.stackVerticalPadding = 0; n.stackPaddingBottom = 0; n.stackHorizontalPadding = 0; n.stackPaddingRight = 0;
+        ks.forEach(function (k) { k.stackPositioning = 'ABSOLUTE'; });
+        return;
+      }
       var plans = [true, false].map(function (v) {
         var st = function (k) { var b = box(k); return v ? b.y : b.x; }, en = function (k) { var b = box(k); return v ? b.y + b.h : b.x + b.w; };
         var lo = function (k) { var b = box(k); return v ? b.x : b.y; }, hi = function (k) { var b = box(k); return (v ? W : H) - (v ? b.x + b.w : b.y + b.h); };
@@ -487,6 +501,36 @@
       run.forEach(function (k, idx) { k.parentIndex = { guid: k.parentIndex.guid, position: slots[idx] }; });
     });
     ctx.inserts.forEach(function (ins) { var i = nc.indexOf(ins.before); nc.splice(i < 0 ? nc.length : i, 0, ins.node); });
+  }
+
+  // Any auto layout frame whose stored child positions don't match what Figma would compute is rebuilt.
+  function repairLayouts(doc) {
+    var nc = doc.nodeChanges, t = treeOf(nc), fixed = 0;
+    nc.forEach(function (n) {
+      if (n.__gone || !n.stackMode || n.stackMode === 'NONE' || n.stackWrap === 'WRAP') return;
+      var v = n.stackMode === 'VERTICAL';
+      var ks = t.kids(n).filter(function (c) { return c.stackPositioning !== 'ABSOLUTE'; });
+      var W = n.size.x, H = n.size.y, pt = n.stackVerticalPadding || 0, pb = n.stackPaddingBottom || 0, pl = n.stackHorizontalPadding || 0, pr = n.stackPaddingRight || 0, gap = n.stackSpacing || 0;
+      var total = ks.reduce(function (a, c) { return a + (v ? c.size.y : c.size.x); }, 0) + gap * Math.max(0, ks.length - 1);
+      var pos = v ? pt : pl, avail = v ? H - pt - pb : W - pl - pr, g = gap;
+      if (n.stackPrimaryAlignItems === 'CENTER') pos += (avail - total) / 2;
+      if (n.stackPrimaryAlignItems === 'MAX') pos += avail - total;
+      if (n.stackPrimaryAlignItems === 'SPACE_BETWEEN' && ks.length > 1) g = (avail - total + gap * (ks.length - 1)) / (ks.length - 1);
+      var ok = ks.every(function (c) {
+        var b = box(c), m = v ? b.y : b.x, cc = v ? b.x : b.y, sz = v ? b.w : b.h, cs = v ? pl : pt, ce = v ? W - pr : H - pb;
+        var exp = n.stackCounterAlignItems === 'CENTER' ? cs + (ce - cs - sz) / 2 : n.stackCounterAlignItems === 'MAX' ? ce - sz : cs;
+        if (c.stackChildAlignSelf === 'STRETCH') exp = cs;
+        var good = Math.abs(m - pos) <= 1 && Math.abs(cc - exp) <= 1;
+        pos += (v ? b.h : b.w) + g;
+        return good;
+      });
+      if (ok) return;
+      Object.keys(n).forEach(function (k) { if (/^stack/.test(k) && !/^stackChild|^stackPositioning$/.test(k)) delete n[k]; });
+      ks.forEach(function (c) { delete c.stackChildAlignSelf; delete c.stackChildPrimaryGrow; });
+      fixed++;
+    });
+    if (fixed) layoutRest(doc);
+    return fixed;
   }
 
   // ---------- layer names ----------
@@ -593,6 +637,7 @@
       tidy(res.document);
       try { layoutRest(res.document); } catch (e) { console.warn('layout', e); }
       tidy(res.document);
+      try { repairLayouts(res.document); } catch (e) { console.warn('repair', e); }
       try { nameLayers(res.document); } catch (e) { console.warn('names', e); }
       res.document.nodeChanges.forEach(function (n) { Object.keys(n).forEach(function (k) { if (k.indexOf('__') === 0) delete n[k]; }); });
       var html = F2FFigit.composeClipboardHtml(F2FFigit.encodeFigmaData(res.document).base64);
