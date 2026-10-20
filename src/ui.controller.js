@@ -8,7 +8,7 @@
 
   // ---------- small helpers ----------
   function setStatus(t, cls) { var s = $('status'); s.textContent = t || ''; s.className = 'status' + (cls ? ' ' + cls : ''); }
-  function setBar(p) { $('bar').style.width = Math.round(Math.max(0, Math.min(1, p)) * 100) + '%'; }
+  function setBar(p) { var v = Math.max(0, Math.min(1, p)); $('bar').dataset.p = v; $('bar').style.transform = 'scaleX(' + v + ')'; }
   function toFigma(msg) { parent.postMessage({ pluginMessage: msg }, '*'); }
   var toastT;
   function toast(t) { var el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(function () { el.classList.remove('show'); }, 2600); }
@@ -174,7 +174,7 @@
     }
     var ws = boardsActive() ? [widths()[0] || 1440] : widths();
     view('work'); setPhase(0); setBar(0.03);
-    $('step3').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    $('step3').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
 
     var x = 0, missing = {}, total = 0, frames = 0, failed = 0, tries = 0, canvasNote = false, lastErr = '';
     var svgRoots = [], svgImages = {}, imgSeq = 0, natFrames = []; lastFig = null;
@@ -200,7 +200,7 @@
           $('pvLabel').textContent = boardsActive() ? base : label;
           setStatus(jobsTotal > 1 ? 'Frame ' + (jobsDone + 1) + ' of ' + jobsTotal + ' · ' + label : label);
           setBar(start + slice * 0.1);
-          var tick = setInterval(function () { var cur = parseFloat($('bar').style.width) / 100; if (cur < start + slice * 0.6) setBar(cur + slice * 0.04); }, 400);
+          var tick = setInterval(function () { var cur = +$('bar').dataset.p || 0; if (cur < start + slice * 0.6) setBar(cur + slice * 0.04); }, 400);
           var res;
           try { res = await prepareAndCapture(page.html, w, label, opts); } finally { clearInterval(tick); }
           setPhase(2); setBar(start + slice * 0.7);
