@@ -17,6 +17,8 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function show(id, on) { $(id).classList.toggle('hidden', !on); }
   function onRendered() { setPhase(1); }
+  // The canvas (browser mode) listens to these to draw what the user is about to get.
+  function emit(name, detail) { try { document.dispatchEvent(new CustomEvent('f2f:' + name, { detail: detail })); } catch (e) {} }
 
   // ---------- mode label ----------
   if (!IN_FIGMA) {
@@ -41,6 +43,11 @@
       plural(pageCount() * ws.length, 'frame') + ' will be created';
     $('step1').classList.toggle('done', has);
     $('step2').classList.toggle('done', has && okSize);
+    emit('state', {
+      has: has, mode: mode, name: mode === 'paste' ? (has ? 'Pasted HTML' : '') : source ? source.name : '',
+      boards: boardsActive() ? source.boards : null, widths: ws,
+      pages: mode === 'file' && source && source.kind === 'zip' ? Array.prototype.map.call(document.querySelectorAll('#pages input:checked'), function (c) { return source.pages[+c.dataset.i].path; }) : null
+    });
     if (mode === 'paste') {
       var n = $('paste').value.trim().length;
       $('pasteInfo').textContent = n > 20 ? Math.round(n / 1024 * 10) / 10 + ' KB of HTML ready' : 'Waiting for code';
@@ -145,6 +152,7 @@
   }
   function view(which) { // 'ready' | 'work' | 'done'
     show('readyBox', which === 'ready'); show('workBox', which === 'work'); show('doneBox', which === 'done');
+    emit('view', { view: which });
     $('work').classList.toggle('finished', which !== 'work');
     var lock = which === 'work';
     ['step1', 'step2'].forEach(function (id) { $(id).style.opacity = lock ? .55 : ''; $(id).style.pointerEvents = lock ? 'none' : ''; });
@@ -252,7 +260,10 @@
   };
 
   function finish(r) {
+    // In browser mode, count what actually goes to Figma (the payload), so every number on screen agrees.
+    if (!IN_FIGMA && lastFig && lastFig.document) r.total = lastFig.document.nodeChanges.filter(function (n) { return n.type !== 'DOCUMENT' && n.type !== 'CANVAS'; }).length;
     view('done');
+    emit('done', { ok: r.ok, doc: !IN_FIGMA && lastFig ? lastFig.document : null, frames: r.frames, total: r.total });
     var badge = $('badge');
     badge.className = 'badge' + (r.ok ? '' : ' err');
     badge.innerHTML = r.ok ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'

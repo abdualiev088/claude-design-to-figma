@@ -1,0 +1,155 @@
+  /* =====================================================================
+     Browser mode: a design-tool workbench (top bar, inspector, canvas).
+     The Figma plugin window keeps the compact single column above.
+     ===================================================================== */
+  .topbar, .canvas, .panel-h, .skip { display: none; }
+  .nojs { margin: 18px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-ink); font-size: 13px; }
+  .credit { display: none; }
+  html:not(.in-figma) .credit { display: block; margin-top: 4px; font-size: 11px; }
+  .ico-svg { display: inline-block; flex: none; vertical-align: middle; }
+  .skip { position: fixed; left: 12px; top: 10px; z-index: 50; padding: 8px 12px; border-radius: 8px; background: var(--ink); color: var(--card); text-decoration: none; font-weight: 600; transform: translateY(-160%); }
+  html:not(.in-figma) .skip { display: block; }
+  .skip:focus-visible { transform: none; }
+
+  html:not(.in-figma) { --top: 52px; --ruler: 18px; }
+  html:not(.in-figma) body { background-image: none; }
+  html:not(.in-figma) .head { display: none; }
+  html:not(.in-figma) .topbar {
+    display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 20; height: var(--top);
+    padding: 0 18px; background: color-mix(in srgb, var(--card) 92%, transparent); border-bottom: 1px solid var(--line);
+    backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  }
+  .tb-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .tb-name { font: 700 15px/1 var(--display); letter-spacing: -.01em; white-space: nowrap; }
+  .tb-file { font: 500 11px/1 var(--mono); color: var(--ink-2); padding: 5px 8px; border-radius: 6px; background: var(--card-2); border: 1px solid var(--line); max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tb-links { margin-left: auto; display: flex; gap: 6px; }
+  .tb-link { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border-radius: 8px; color: var(--ink); text-decoration: none; font-weight: 500; font-size: 12.5px; border: 1px solid transparent; transition: background-color .15s ease-out, border-color .15s ease-out; }
+  .tb-plugin { border-color: var(--line-2); background: var(--card); }
+  @media (prefers-color-scheme: dark) { html:not(.in-figma) .ico-logos-github-icon { filter: invert(1); } }
+
+  html:not(.in-figma) .bench {
+    display: grid; grid-template-columns: minmax(340px, 400px) minmax(0, 1fr); align-items: start;
+    min-height: calc(100vh - var(--top));
+  }
+  html:not(.in-figma) .app {
+    grid-column: 1; grid-row: 1; max-width: none; margin: 0; padding: 14px 16px 40px; gap: 10px;
+    background: var(--card); border-right: 1px solid var(--line); min-height: calc(100vh - var(--top));
+  }
+  html:not(.in-figma) .panel-h { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 2px; font: 600 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  html:not(.in-figma) .panel-h .mode { margin: 0; }
+  html:not(.in-figma) .step { box-shadow: none; background: var(--card); border-color: var(--line); }
+  html:not(.in-figma) .app:focus { outline: none; }
+
+  /* ---------- canvas ---------- */
+  html:not(.in-figma) .canvas {
+    grid-column: 2; grid-row: 1; display: block; position: sticky; top: var(--top); height: calc(100vh - var(--top)); overflow: hidden;
+    background-color: var(--canvas);
+    background-image: radial-gradient(var(--dot) 1px, transparent 1.2px);
+    background-size: 20px 20px; background-position: calc(var(--ruler) - 10px) calc(var(--ruler) - 10px);
+    padding: calc(var(--ruler) + 28px) 40px 40px calc(var(--ruler) + 40px);
+  }
+  .ruler { position: absolute; z-index: 2; background-color: var(--card); color: var(--ink-3); pointer-events: none; }
+  .ruler-x { left: 0; right: 0; top: 0; height: var(--ruler); border-bottom: 1px solid var(--line);
+    background-image: repeating-linear-gradient(90deg, var(--line-2) 0 1px, transparent 1px 10px), repeating-linear-gradient(90deg, var(--ink-3) 0 1px, transparent 1px 100px);
+    background-size: 100% 5px, 100% 9px; background-repeat: repeat-x; background-position: var(--ruler) 100%, var(--ruler) 100%; }
+  .ruler-y { top: 0; bottom: 0; left: 0; width: var(--ruler); border-right: 1px solid var(--line);
+    background-image: repeating-linear-gradient(180deg, var(--line-2) 0 1px, transparent 1px 10px), repeating-linear-gradient(180deg, var(--ink-3) 0 1px, transparent 1px 100px);
+    background-size: 5px 100%, 9px 100%; background-repeat: repeat-y; background-position: 100% var(--ruler), 100% var(--ruler); }
+
+  /* hero: the headline set inside a selected Figma frame */
+  .cv-hero { position: relative; height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 26px; max-width: 980px; margin: 0 auto; }
+  .sel-frame { position: relative; padding: clamp(28px, 4.2vw, 64px) clamp(24px, 4vw, 60px) clamp(30px, 4vw, 56px); background: var(--card); outline: 1.5px solid var(--sel); box-shadow: 0 30px 80px -40px rgba(28, 27, 25, .35); }
+  .canvas.over .sel-frame { outline-width: 3px; }
+  .canvas.over .sf-size { background: var(--clay); }
+  .sf-label { position: absolute; left: -1px; top: -26px; display: inline-flex; align-items: center; gap: 5px; font: 500 11px/1 var(--mono); color: var(--sel); }
+  .sf-h { position: absolute; width: 9px; height: 9px; background: var(--card); border: 1.5px solid var(--sel); }
+  .sf-h.tl { left: -5px; top: -5px; } .sf-h.tr { right: -5px; top: -5px; } .sf-h.bl { left: -5px; bottom: -5px; } .sf-h.br { right: -5px; bottom: -5px; }
+  .sf-h.tm { left: calc(50% - 4.5px); top: -5px; } .sf-h.bm { left: calc(50% - 4.5px); bottom: -5px; }
+  .sf-h.ml { left: -5px; top: calc(50% - 4.5px); } .sf-h.mr { right: -5px; top: calc(50% - 4.5px); }
+  .sf-size { position: absolute; left: 50%; bottom: -12px; transform: translateX(-50%); font: 500 10.5px/1 var(--mono); color: #fff; background: var(--sel); padding: 5px 7px; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .eyebrow { margin: 0 0 18px; font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--clay-ink); }
+  .hero-h { margin: 0; font: 700 clamp(40px, 5.6vw, 92px)/.95 var(--display); letter-spacing: -.035em; color: var(--ink); max-width: 13ch; text-wrap: balance; }
+  .hero-h em { font: 400 italic 1.04em/1 var(--serif); letter-spacing: -.01em; color: var(--clay); padding-right: .04em; }
+  .hero-sub { margin: 22px 0 0; max-width: 48ch; font-size: clamp(14px, 1.15vw, 16.5px); line-height: 1.55; color: var(--ink-2); text-wrap: pretty; }
+  .hero-cta { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 28px; }
+  .go.cta { width: auto; padding: 13px 20px; }
+  .cta-alt { color: var(--ink-3); font-size: 12.5px; }
+  .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips li { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px 7px 9px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font-size: 12.5px; font-weight: 500; color: var(--ink); box-shadow: var(--shadow); }
+  .chips li .ico-svg { color: var(--sel); }
+  .split-w { display: inline-block; white-space: pre; }
+  .split-m { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: .08em; margin-bottom: -.08em; }
+
+  /* plan: the frames this design will become */
+  .cv-plan, .cv-layers { position: relative; height: 100%; display: flex; flex-direction: column; }
+  .cv-cap { display: flex; align-items: baseline; gap: 12px; margin-bottom: 26px; }
+  .cv-k { font: 700 22px/1.1 var(--display); letter-spacing: -.02em; }
+  .cv-v { font: 500 11.5px/1.3 var(--mono); color: var(--ink-2); }
+  .frames { position: relative; flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 36px; flex-wrap: wrap; align-content: flex-start; }
+  .fr { position: relative; flex: none; }
+  .fr-label { position: absolute; left: 0; bottom: calc(100% + 7px); max-width: 100%; display: flex; gap: 6px; align-items: center; font: 500 11px/1 var(--mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fr-body { position: relative; width: 100%; height: 100%; background: var(--card); border: 1px solid var(--line); overflow: hidden; box-shadow: var(--shadow); }
+  .fr.sel .fr-body { outline: 1.5px solid var(--sel); outline-offset: -1px; border-color: transparent; }
+  .fr.sel .fr-label { color: var(--sel); }
+  .fr-size { position: absolute; left: 50%; top: calc(100% + 8px); transform: translateX(-50%); font: 500 10px/1 var(--mono); color: var(--ink-2); background: var(--card-2); border: 1px solid var(--line); padding: 4px 6px; border-radius: 3px; white-space: nowrap; }
+  .fr.sel .fr-size { color: #fff; background: var(--sel); border-color: var(--sel); }
+  .sk { position: absolute; left: 8%; right: 8%; border-radius: 3px; background: var(--card-2); }
+  .sk.a { top: 7%; height: 4%; right: 55%; background: color-mix(in srgb, var(--clay) 30%, var(--card-2)); }
+  .sk.b { top: 16%; height: 14%; }
+  .sk.c { top: 36%; height: 26%; right: 52%; }
+  .sk.d { top: 36%; height: 26%; left: 52%; }
+  .sk.e { top: 68%; height: 4%; right: 30%; }
+  .sk.f { top: 75%; height: 4%; right: 45%; }
+  .fr-scan { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: linear-gradient(180deg, transparent, var(--sel-soft) 50%, transparent); }
+  .canvas.working .fr.sel .fr-scan { opacity: 1; animation: frscan 1.4s ease-in-out infinite; }
+  @keyframes frscan { from { transform: translateY(-100%); } to { transform: translateY(100%); } }
+  .fr-more { align-self: center; font: 500 12px/1 var(--mono); color: var(--ink-2); }
+  .fr-done { position: absolute; right: 6px; top: 6px; color: var(--ok); opacity: 0; }
+  .canvas.finished .fr-done { opacity: 1; }
+
+  /* layers: the real tree that will land in Figma */
+  .cv-layers { flex-direction: row; gap: 28px; }
+  .cv-layers .frames-mini { flex: 1; min-width: 0; }
+  .lp { width: 320px; flex: none; display: flex; flex-direction: column; max-height: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 24px 60px -36px rgba(28, 27, 25, .4); overflow: hidden; }
+  .lp-h { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .lp-h > span:first-child { display: inline-flex; gap: 7px; align-items: center; }
+  .lp-count { font: 500 11px/1 var(--mono); color: var(--ink-2); }
+  .lp-tree { list-style: none; margin: 0; padding: 6px 0; overflow: auto; flex: 1; min-height: 0; font-size: 12px; }
+  .lp-tree li { display: flex; align-items: center; gap: 7px; height: 28px; padding-right: 12px; white-space: nowrap; color: var(--ink); }
+  .lp-tree li .ico-svg { color: var(--ink-3); }
+  .lp-tree li.top { font-weight: 600; }
+  .lp-tree li.top .ico-svg { color: var(--sel); }
+  .lp-tree li .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .lp-tree li .tg { margin-left: auto; font: 500 9.5px/1 var(--mono); color: var(--ink-3); padding: 3px 5px; border-radius: 3px; background: var(--card-2); }
+  .lp-tree li.more { color: var(--ink-3); font-style: italic; }
+  .lp-legend { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+  .lp-legend span { display: inline-flex; gap: 5px; align-items: center; font: 500 10.5px/1 var(--mono); color: var(--ink-2); padding: 5px 7px; border-radius: 5px; background: var(--card-2); }
+  .lp-legend b { color: var(--ink); }
+
+  /* a multiplayer-style cursor that follows a real mouse on the canvas */
+  .cursor { position: absolute; left: 0; top: 0; z-index: 5; display: none; align-items: flex-start; gap: 2px; pointer-events: none; color: var(--clay); opacity: 0; }
+  .cursor span { margin-top: 14px; font: 600 10.5px/1 var(--body); color: #fff; background: var(--clay); padding: 4px 7px; border-radius: 10px 10px 10px 2px; }
+  @media (hover: hover) and (pointer: fine) { html:not(.in-figma).motion-ok .cursor { display: flex; } }
+
+  @media (hover: hover) and (pointer: fine) {
+    .tb-link:hover { background: var(--card-2); border-color: var(--line); }
+  }
+
+  /* ---------- narrower screens: canvas becomes the opening section ---------- */
+  @media (max-width: 980px) {
+    html:not(.in-figma) .bench { display: flex; flex-direction: column; }
+    html:not(.in-figma) .canvas { position: relative; top: 0; height: auto; min-height: min(88vh, 760px); padding: calc(var(--ruler) + 34px) 18px 34px calc(var(--ruler) + 16px); }
+    html:not(.in-figma) .app { border-right: 0; border-top: 1px solid var(--line); min-height: 0; max-width: 640px; width: 100%; margin: 0 auto; }
+    .cv-layers { flex-direction: column; }
+    .lp { width: 100%; max-height: 420px; }
+    .tb-file { display: none; }
+    .tb-link span { display: none; }
+    .tb-link { padding: 0 9px; }
+  }
+  @media (max-width: 560px) {
+    html:not(.in-figma) { --ruler: 0px; }
+    .ruler { display: none; }
+    .sel-frame { padding: 34px 20px 36px; }
+    .hero-sub { margin-top: 16px; }
+    .tb-name { font-size: 14px; }
+  }
