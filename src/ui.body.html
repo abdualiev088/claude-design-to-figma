@@ -1,0 +1,203 @@
+<body>
+<a class="skip" href="#app">Skip to the converter</a>
+<div class="shell">
+
+  <header class="topbar" id="topbar">
+    <div class="tb-brand">
+      <div class="mark" aria-hidden="true"><i></i><!--icon:solar:arrow-right-linear:14--><b></b></div>
+      <span class="tb-name">Claude Design <span aria-hidden="true">→</span><span class="sr">to</span> Figma</span>
+      <span class="tb-file" id="tbFile" aria-live="polite">Untitled</span>
+    </div>
+    <nav class="tb-links" aria-label="Project links">
+      <a class="tb-link" href="https://github.com/abdualiev088/claude-design-to-figma" target="_blank" rel="noopener"><!--icon:logos:github-icon:16--><span>Source</span></a>
+      <a class="tb-link tb-plugin" href="claude-design-to-figma.zip" download><!--icon:logos:figma:16--><span>Figma plugin</span></a>
+    </nav>
+  </header>
+
+  <main class="bench">
+    <!-- ===== canvas: what you are about to get ===== -->
+    <section class="canvas" id="canvas" aria-label="Canvas preview">
+      <div class="ruler ruler-x" aria-hidden="true"></div>
+      <div class="ruler ruler-y" aria-hidden="true"></div>
+
+      <div class="cv-hero" id="cvHero">
+        <div class="sel-frame" id="heroFrame">
+          <span class="sf-label" aria-hidden="true"><!--icon:solar:frame-linear:12-->Hero</span>
+          <span class="sf-h tl" aria-hidden="true"></span><span class="sf-h tr" aria-hidden="true"></span><span class="sf-h bl" aria-hidden="true"></span><span class="sf-h br" aria-hidden="true"></span>
+          <span class="sf-h tm" aria-hidden="true"></span><span class="sf-h bm" aria-hidden="true"></span><span class="sf-h ml" aria-hidden="true"></span><span class="sf-h mr" aria-hidden="true"></span>
+          <p class="eyebrow">HTML <span aria-hidden="true">→</span> layers, in your browser</p>
+          <h2 class="hero-h" id="heroH" data-split>Claude Design in. <em>Figma layers</em> out.</h2>
+          <p class="hero-sub" id="heroSub">Drop an export, copy once, paste into Figma. You get real frames with auto layout, editable text and vector icons. Everything runs in this tab; nothing is uploaded.</p>
+          <div class="hero-cta">
+            <button type="button" class="go cta" id="heroCta"><!--icon:solar:upload-minimalistic-linear:16--><span>Choose a design</span></button>
+            <span class="cta-alt">or drop it anywhere · <kbd>⌘V</kbd></span>
+          </div>
+          <noscript><p class="nojs">The converter runs in your browser and needs JavaScript turned on.</p></noscript>
+          <span class="sf-size" id="heroSize" aria-hidden="true">1440 × 900</span>
+        </div>
+        <ul class="chips" id="heroChips" aria-label="What you get">
+          <li><!--icon:solar:align-vertical-spacing-linear:14-->Auto layout</li>
+          <li><!--icon:solar:text-square-linear:14-->Editable text</li>
+          <li><!--icon:solar:pen-new-round-linear:14-->Vector icons</li>
+          <li><!--icon:solar:layers-minimalistic-linear:14-->One frame per artboard</li>
+        </ul>
+      </div>
+
+      <div class="cv-plan hidden" id="cvPlan">
+        <div class="cv-cap"><span class="cv-k" id="planKicker">Frames to create</span><span class="cv-v" id="planNote"></span></div>
+        <div class="frames" id="frames"></div>
+      </div>
+
+      <div class="cv-layers hidden" id="cvLayers">
+        <div class="frames frames-mini" id="framesMini" aria-hidden="true"></div>
+        <div class="lp" role="group" aria-labelledby="lpTitle">
+          <div class="lp-h"><span id="lpTitle"><!--icon:solar:layers-minimalistic-linear:14-->Layers</span><span class="lp-count" id="lpCount"></span></div>
+          <ul class="lp-tree" id="lpTree" data-lenis-prevent></ul>
+          <div class="lp-legend" id="lpLegend"></div>
+        </div>
+      </div>
+
+      <div class="cursor" id="cursor" aria-hidden="true"><!--icon:solar:cursor-linear:18--><span>You</span></div>
+    </section>
+
+    <div class="app" id="app" tabindex="-1">
+
+      <header class="head">
+        <div class="mark" aria-hidden="true"><i></i><!--icon:solar:arrow-right-linear:14--><b></b></div>
+        <h1>Claude Design → Figma</h1>
+        <span class="mode" id="modeTag">Figma plugin</span>
+      </header>
+
+      <div class="panel-h" aria-hidden="true"><span>Design</span><span class="mode" id="modeTag2">Browser mode</span></div>
+
+      <!-- ===== 1. design ===== -->
+      <section class="step" id="step1" aria-labelledby="s1title">
+        <div class="step-h"><div class="num"><span>1</span></div><h2 id="s1title">Your design</h2><span class="aside" id="s1aside">.html or .zip from Claude Design</span></div>
+
+        <div id="dropArea">
+          <button type="button" id="drop" class="drop" aria-describedby="dropHelp">
+            <span class="h tl"></span><span class="h tr"></span><span class="h bl"></span><span class="h br"></span>
+            <span class="ico"><!--icon:solar:upload-minimalistic-linear:20--></span>
+            <strong>Drop your export here</strong>
+            <small id="dropHelp">or click to browse · <kbd>⌘V</kbd> to paste</small>
+            <span class="tag">Frame · .html / .zip</span>
+          </button>
+          <input id="fileInput" type="file" accept=".html,.htm,.zip" class="hidden">
+          <div class="paste-row" style="justify-content:center;margin-top:16px"><button type="button" class="linkbtn" id="tabPaste">Paste HTML code instead</button></div>
+        </div>
+
+        <div id="panePaste" class="paste-wrap hidden">
+          <textarea id="paste" placeholder="Paste the full HTML of your design…" spellcheck="false" data-lenis-prevent aria-label="HTML of your design"></textarea>
+          <div class="paste-row"><span id="pasteInfo">Waiting for code</span><button type="button" class="linkbtn" id="tabFile">Use a file instead</button></div>
+        </div>
+
+        <div id="fileBox" class="hidden">
+          <div class="file">
+            <div class="fi" id="fileExt">html</div>
+            <div class="meta"><div class="name" id="fileName"></div><div class="info" id="fileInfo"></div></div>
+            <button type="button" class="iconbtn" id="clearFile" title="Choose another file" aria-label="Remove file"><!--icon:solar:close-circle-linear:16--></button>
+          </div>
+          <div id="pagesBox" class="hidden">
+            <div class="hint" style="margin-top:12px">Pages to import</div>
+            <div id="pages" class="pages" data-lenis-prevent></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 2. size ===== -->
+      <section class="step" id="step2" aria-labelledby="s2title">
+        <div class="step-h"><div class="num"><span>2</span></div><h2 id="s2title">Frame size</h2><span class="aside" id="s2aside">pick one or more</span></div>
+
+        <div id="sizePicker">
+          <div class="sizes" role="group" aria-label="Frame widths">
+            <label class="size"><input type="checkbox" class="w" value="1440" checked>
+              <span class="dev"><!--icon:solar:monitor-linear:22--></span>
+              <span class="nm">Desktop</span><span class="px">1440</span></label>
+            <label class="size"><input type="checkbox" class="w" value="768">
+              <span class="dev"><!--icon:solar:tablet-linear:22--></span>
+              <span class="nm">Tablet</span><span class="px">768</span></label>
+            <label class="size"><input type="checkbox" class="w" value="390">
+              <span class="dev"><!--icon:solar:smartphone-linear:22--></span>
+              <span class="nm">Mobile</span><span class="px">390</span></label>
+            <label class="size custom"><input type="checkbox" id="customOn">
+              <span class="dev"><!--icon:solar:ruler-linear:22--></span>
+              <span class="nm">Custom</span><input type="number" id="customW" placeholder="width" min="200" max="4000" aria-label="Custom width in pixels"></label>
+          </div>
+          <div class="hint" id="sizeHint">Each width becomes its own Figma frame.</div>
+        </div>
+
+        <div id="boardsBox" class="hidden">
+          <div class="boards" id="boards"></div>
+          <div class="hint">Claude Design canvas detected. Each artboard keeps its own size and becomes its own frame.</div>
+        </div>
+
+        <details class="tune">
+          <summary><!--icon:solar:alt-arrow-right-linear:12-->Fine-tune</summary>
+          <div class="opts">
+            <label class="opt"><span class="lbl">Auto layout<small>Rebuild flex rows and columns as auto layout</small></span><span class="switch"><input type="checkbox" id="optAL" checked><span></span></span></label>
+            <label class="opt"><span class="lbl">Show full page<small>Unfold areas that scroll inside the design</small></span><span class="switch"><input type="checkbox" id="optExpand" checked><span></span></span></label>
+            <label class="opt"><span class="lbl">First screen only<small>Crop the frame to the viewport height</small></span><span class="switch"><input type="checkbox" id="optFirst"><span></span></span></label>
+            <label class="opt"><span class="lbl">Viewport height<small>Used for 100vh sections</small></span><input class="num-in" type="number" id="optVH" value="900" min="300" max="3000"></label>
+            <label class="opt"><span class="lbl">Load wait (ms)<small>Raise if fonts or images come in late</small></span><input class="num-in" type="number" id="optWait" value="1500" min="0" max="20000" step="250"></label>
+          </div>
+        </details>
+      </section>
+
+      <!-- ===== 3. import ===== -->
+      <section class="step" id="step3" aria-labelledby="s3title">
+        <div class="step-h"><div class="num"><span>3</span></div><h2 id="s3title">Import</h2></div>
+
+        <div id="readyBox">
+          <button type="button" id="go" class="go" disabled><span id="goLabel">Import to Figma</span><span class="arrow"><!--icon:solar:arrow-right-linear:16--></span></button>
+          <div class="why" id="why" style="margin-top:8px">Add a design to start</div>
+        </div>
+
+        <div id="workBox" class="hidden">
+          <div class="work" id="work">
+            <div class="pv"><div class="fl" id="pvLabel">Frame</div><div class="box"><div class="stage" id="stage"></div></div></div>
+            <div>
+              <ol class="phases" id="phases">
+                <li data-p="0"><span class="st"></span>Opening the design</li>
+                <li data-p="1"><span class="st"></span>Reading layers</li>
+                <li data-p="2"><span class="st"></span><span id="phase2">Building in Figma</span></li>
+              </ol>
+              <div class="bar"><i id="bar"></i></div>
+              <div class="status" id="status" role="status" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="doneBox" class="hidden">
+          <div class="result">
+            <div class="badge" id="badge"><!--icon:solar:check-circle-linear:26--></div>
+            <h3 id="doneTitle">It's in Figma</h3>
+            <p class="sum" id="doneSum"></p>
+            <div class="stats" id="doneStats"></div>
+
+            <div id="svgActions" class="hidden">
+              <div class="actions two">
+                <button type="button" id="copySvg" class="go clay"><!--icon:solar:copy-linear:16--><span id="copyLabel">Copy for Figma</span></button>
+                <button type="button" id="dlSvg" class="go ghost" title="Download a flat SVG picture (no auto layout)"><!--icon:solar:download-minimalistic-linear:16-->.svg</button>
+              </div>
+              <ol class="how">
+                <li><span>Open your file in <b>Figma</b> (browser or desktop)</span></li>
+                <li><span>Click an empty spot on the canvas</span></li>
+                <li><span>Press <span class="kbd">⌘V</span> / <span class="kbd">Ctrl V</span> on the canvas</span></li>
+              </ol>
+            </div>
+
+            <div id="noteBox"></div>
+            <div class="actions"><button type="button" class="go ghost" id="again">Import another design</button></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="note info browser-tip hidden" id="standaloneNote">
+        <!--icon:solar:info-circle-linear:16-->
+        <span>You're in <b>browser mode</b>: <b>Copy for Figma</b> gives real frames with auto layout and editable text, ready to paste. Prefer working inside Figma? <a href="claude-design-to-figma.zip" download id="pluginLink">Get the plugin</a>, unzip, then in Figma desktop go to Plugins → Development → Import plugin from manifest.</span>
+      </div>
+      <div class="foot"><!--icon:solar:shield-check-linear:14--> Runs entirely on your computer. Nothing is uploaded.<span class="credit">Icons: <a href="https://www.figma.com/community/file/1166831539721848736" target="_blank" rel="noopener">Solar</a> by 480 Design, CC BY 4.0</span></div>
+    </div>
+
+  </main>
+</div>
