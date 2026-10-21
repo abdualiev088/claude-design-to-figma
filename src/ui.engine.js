@@ -611,11 +611,30 @@
     });
   }
 
+  // Remove every auto layout setting (on frames and on their children). Child transforms are already
+  // absolute offsets inside the parent, so the picture stays identical; only the flow behaviour goes.
+  // Scroll areas that were not unfolded ("Show full page" off, or small ones) keep their content inside.
+  function clipScrollers(doc) {
+    doc.nodeChanges.forEach(function (n) {
+      if (n.type !== 'FRAME' || !n.__els || !n.__els.length || n.frameMaskDisabled === false) return;
+      var clip = n.__els.some(function (el) {
+        try { var cs = el.ownerDocument.defaultView.getComputedStyle(el); return el !== el.ownerDocument.body && el !== el.ownerDocument.documentElement && (/(auto|scroll|hidden|clip)/.test(cs.overflowX) || /(auto|scroll|hidden|clip)/.test(cs.overflowY)); } catch (e) { return false; }
+      });
+      if (clip) n.frameMaskDisabled = false;
+    });
+  }
+  function stripAutoLayout(doc) {
+    doc.nodeChanges.forEach(function (n) {
+      Object.keys(n).forEach(function (k) { if (/^stack/.test(k)) delete n[k]; });
+    });
+  }
   var F2FNative = window.F2FNative = {
     tidy: tidy,
     missingFonts: {},
     frames: nativeFrames,
-    convert: async function (frames, canvasName) {
+    convert: async function (frames, canvasName, opts) {
+      opts = opts || {};
+      var useAL = opts.autoLayout !== false;
       if (!frames.length || !window.F2FFigit) return null;
       F2FNative.missingFonts = {};
       var chars = textChars(frames);
@@ -634,10 +653,16 @@
         for (var k in o) if (o[k] && typeof o[k] === 'object') walk(o[k]);
       })(res.document.nodeChanges);
       try { attachElements(res.document, res.trace, frames); } catch (e) { console.warn('trace', e); }
+      try { clipScrollers(res.document); } catch (e) { console.warn('clip', e); }
       tidy(res.document);
-      try { layoutRest(res.document); } catch (e) { console.warn('layout', e); }
-      tidy(res.document);
-      try { repairLayouts(res.document); } catch (e) { console.warn('repair', e); }
+      if (useAL) {
+        try { layoutRest(res.document); } catch (e) { console.warn('layout', e); }
+        tidy(res.document);
+        try { repairLayouts(res.document); } catch (e) { console.warn('repair', e); }
+      } else {
+        // Auto layout switched off: every frame keeps its measured position and size, nothing flows.
+        stripAutoLayout(res.document);
+      }
       try { nameLayers(res.document); } catch (e) { console.warn('names', e); }
       res.document.nodeChanges.forEach(function (n) { Object.keys(n).forEach(function (k) { if (k.indexOf('__') === 0) delete n[k]; }); });
       var html = F2FFigit.composeClipboardHtml(F2FFigit.encodeFigmaData(res.document).base64);

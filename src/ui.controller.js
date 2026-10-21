@@ -249,8 +249,8 @@
       lastBoxes = svgRoots.map(function (o) { return { name: o.tree.name, x: o.x, y: o.y, w: o.tree.w, h: o.tree.h }; });
       lastSvgName = (pages[0].path.replace(/\.html?$/i, '').split('/').pop() || 'design') + '.svg';
       if (natFrames.length) {
-        setStatus('Building Figma frames and auto layout…');
-        try { lastFig = await F2FNative.convert(natFrames, pages[0].path.split('/').pop()); }
+        setStatus(opts.autoLayout ? 'Building Figma frames and auto layout…' : 'Building Figma frames…');
+        try { lastFig = await F2FNative.convert(natFrames, pages[0].path.split('/').pop(), { autoLayout: opts.autoLayout }); }
         catch (e) { console.error('native convert failed', e); lastFig = null; }
       }
       $('stage').innerHTML = '';
@@ -287,7 +287,7 @@
         setStatus('Done — ' + r.total + ' layers in ' + what + '.', 'ok');
       } else {
         $('doneTitle').textContent = 'Ready to paste';
-        $('doneSum').textContent = lastFig ? 'Copy it, then paste into any Figma file: real frames, auto layout and editable text.' : 'Copy it, then paste it into any Figma file.';
+        $('doneSum').textContent = lastFig ? ($('optAL').checked ? 'Copy it, then paste into any Figma file: real frames, auto layout and editable text.' : 'Copy it, then paste into any Figma file: real frames at fixed positions (auto layout off) and editable text.') : 'Copy it, then paste it into any Figma file.';
         if (lastFig) { var mf = Object.keys(F2FNative.missingFonts); if (mf.length) notes += '<div class="note"><b>' + (mf.length === 1 ? 'A font isn’t' : 'Some fonts aren’t') + ' on Google Fonts:</b> ' + mf.map(function (k) { return '“' + esc(k) + '”'; }).join(', ') + '. Text keeps its layout; install the font if Figma shows it as missing.</div>'; }
         else notes += '<div class="note">This design could only be copied as a flat picture (SVG), so there is no auto layout. Try exporting it from Claude Design as a .zip.</div>';
         show('svgActions', true);
