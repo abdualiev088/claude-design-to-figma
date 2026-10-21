@@ -6,3 +6,4 @@ node_modules/
 plugin/ui.html
 site/
 src/vendor/figit.bundle.js
+src/vendor/motion.bundle.js

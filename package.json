@@ -1,10 +1,12 @@
 {
   "name": "claude-design-to-figma",
   "private": true,
-  "description": "Build dependencies for the website's Figma clipboard encoder (bundled by build.py).",
+  "description": "Build dependencies for the website: the Figma clipboard encoder and the motion stack (GSAP, Lenis), bundled by build.py.",
   "devDependencies": {
     "@figit/dom-to-figma": "0.2.4",
     "@figit/fig-kiwi": "0.2.0",
-    "esbuild": "0.25.10"
+    "esbuild": "0.25.10",
+    "gsap": "3.13.0",
+    "lenis": "1.3.11"
   }
 }

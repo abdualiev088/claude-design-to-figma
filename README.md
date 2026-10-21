@@ -22,6 +22,8 @@ the Figma desktop app: Plugins → Development → Import plugin from manifest �
 
 ```
 src/       sources: UI shell, controller, capture engine, SVG export, JSZip
+src/ui.body.html, ui.site.css, ui.canvas.js  page markup, the browser-mode workbench styles and canvas
+src/icons.json  interface icons from Iconify: Solar (CC BY 4.0, 480 Design) and Logos (GitHub, Figma marks)
 src/vendor the Figma clipboard encoder (@figit/dom-to-figma, MIT), see src/vendor/README.md
 plugin/    the Figma plugin (manifest.json, code.js; ui.html is generated)
 build.py   builds plugin/ui.html and site/ (the website + plugin zip) from src/
@@ -29,4 +31,4 @@ build.py   builds plugin/ui.html and site/ (the website + plugin zip) from src/
 
 Netlify runs `npm install` and `python3 build.py` on every push to `main` and publishes `site/`. To try changes
 locally, run `npm install && python3 build.py` and serve `site/` (for example `python3 -m http.server -d site`).
-Needs Python 3 and Node. The build also downloads the fallback font (Inter) from npm.
+Needs Python 3 and Node. The website's motion uses GSAP and Lenis (bundled from npm); the plugin window stays static. The build also downloads the fallback font (Inter) from npm.
