@@ -49,7 +49,25 @@
       </div>
 
       <div class="cv-layers hidden" id="cvLayers">
-        <div class="frames frames-mini" id="framesMini" aria-hidden="true"></div>
+        <div class="xv" id="xv">
+          <div class="xv-bar">
+            <span class="xv-t"><!--icon:solar:eye-linear:14-->Export preview</span>
+            <span class="xv-sub" id="xvSub">Exactly what lands in Figma</span>
+            <div class="xv-zoom" role="group" aria-label="Zoom">
+              <button type="button" class="xv-btn" id="xvOut" aria-label="Zoom out"><!--icon:solar:minus-linear:14--></button>
+              <button type="button" class="xv-btn xv-pct" id="xvPct" aria-label="Fit to width">100%</button>
+              <button type="button" class="xv-btn" id="xvIn" aria-label="Zoom in"><!--icon:solar:add-linear:14--></button>
+              <button type="button" class="xv-btn" id="xvAll" aria-label="Fit whole frame"><!--icon:solar:maximize-square-minimalistic-linear:14--></button>
+            </div>
+          </div>
+          <div class="xv-view" id="xvView" data-lenis-prevent tabindex="0" aria-label="Preview of the exported Figma frames. Click a layer to select it.">
+            <div class="xv-world" id="xvWorld">
+              <img class="xv-img" id="xvImg" alt="" decoding="async" draggable="false">
+              <div class="xv-ov" id="xvOv" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="xv-hint" aria-hidden="true">Click to select · drag to pan · <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + scroll to zoom</div>
+        </div>
         <div class="lp" role="group" aria-labelledby="lpTitle">
           <div class="lp-h"><span id="lpTitle"><!--icon:solar:layers-minimalistic-linear:14-->Layers</span><span class="lp-count" id="lpCount"></span></div>
           <ul class="lp-tree" id="lpTree" data-lenis-prevent></ul>

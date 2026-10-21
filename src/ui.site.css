@@ -109,7 +109,46 @@
 
   /* layers: the real tree that will land in Figma */
   .cv-layers { flex-direction: row; gap: 28px; }
-  .cv-layers .frames-mini { flex: 1; min-width: 0; }
+  /* export preview: the converted output, rendered at true proportions, with Figma-style selection */
+  .xv { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+  .xv-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .xv-t { display: inline-flex; align-items: center; gap: 7px; font: 700 15px/1 var(--display); letter-spacing: -.01em; color: var(--ink); }
+  .xv-t .ico-svg { color: var(--sel); }
+  .xv-sub { font: 500 11px/1.3 var(--mono); color: var(--ink-2); }
+  .xv-zoom { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; padding: 3px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+  .xv-btn { display: inline-grid; place-items: center; min-width: 28px; height: 26px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; transition: background-color .15s var(--ease-out), transform .12s var(--ease-out); }
+  .xv-btn:active { transform: scale(.94); }
+  .xv-btn:focus-visible { outline: 2px solid var(--sel); outline-offset: 1px; }
+  .xv-pct { min-width: 48px; }
+  .xv-view { position: relative; flex: 1; min-height: 0; overflow: auto; border-radius: 8px; cursor: default; overscroll-behavior: contain; scrollbar-width: thin; touch-action: pan-x pan-y; }
+  .xv-view:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
+  .xv-view.panning { cursor: grabbing; user-select: none; }
+  .xv-world { position: relative; margin: 30px 24px 40px; }
+  .xv-img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; -webkit-user-drag: none; }
+  .xv-ov { position: absolute; inset: 0; pointer-events: none; }
+  .xv-frame { position: absolute; background: #fff; box-shadow: 0 1px 0 var(--line), 0 24px 60px -34px rgba(28, 27, 25, .45); }
+  .xv-world.loaded .xv-frame { background: transparent; box-shadow: 0 0 0 1px var(--line), 0 24px 60px -34px rgba(28, 27, 25, .45); }
+  .xv-fl { position: absolute; left: 0; bottom: calc(100% + 7px); max-width: 100%; display: flex; gap: 5px; align-items: center; font: 500 11px/1 var(--mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .xv-fl .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .xv-fl .sz { flex: none; color: var(--ink-3); }
+  .xv-fl.on, .xv-fl.on .sz { color: var(--sel); }
+  .xv-hov, .xv-sel { position: absolute; display: none; }
+  .xv-hov { outline: 1px solid var(--sel); }
+  .xv-sel { outline: 1.5px solid var(--sel); background: color-mix(in srgb, var(--sel) 6%, transparent); }
+  .xv-sel i { position: absolute; width: 7px; height: 7px; background: #fff; border: 1.2px solid var(--sel); }
+  .xv-sel i:nth-child(1) { left: -4px; top: -4px; } .xv-sel i:nth-child(2) { right: -4px; top: -4px; } .xv-sel i:nth-child(3) { left: -4px; bottom: -4px; } .xv-sel i:nth-child(4) { right: -4px; bottom: -4px; }
+  .xv-tag { position: absolute; left: -1.5px; bottom: calc(100% + 4px); max-width: 280px; display: inline-flex; gap: 6px; align-items: center; padding: 3px 6px; border-radius: 3px; background: var(--sel); color: #fff; font: 500 10.5px/1.2 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .xv-tag.below { bottom: auto; top: calc(100% + 4px); }
+  .xv-tag b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .xv-tag span { opacity: .8; }
+  .xv-hint { font: 500 10.5px/1.3 var(--mono); color: var(--ink-3); }
+  @media (pointer: coarse) { .xv-hint { display: none; } }
+  .xv-hint kbd { font: inherit; padding: 1px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--card); }
+  .xv-load { position: absolute; left: 50%; top: 40%; transform: translateX(-50%); font: 500 11px/1 var(--mono); color: var(--ink-2); }
+  .lp-tree li[data-k] { cursor: pointer; }
+  .lp-tree li[data-k]:focus-visible { outline: 2px solid var(--sel); outline-offset: -2px; }
+  .lp-tree li.on { background: color-mix(in srgb, var(--sel) 12%, transparent); }
+  .canvas.finished .cursor { visibility: hidden; }
   .lp { width: 320px; flex: none; display: flex; flex-direction: column; max-height: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 24px 60px -36px rgba(28, 27, 25, .4); overflow: hidden; }
   .lp-h { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
   .lp-h > span:first-child { display: inline-flex; gap: 7px; align-items: center; }
@@ -133,15 +172,20 @@
 
   @media (hover: hover) and (pointer: fine) {
     .tb-link:hover { background: var(--card-2); border-color: var(--line); }
+    .xv-btn:hover { background: var(--card-2); }
+    .lp-tree li[data-k]:not(.on):hover { background: var(--card-2); }
   }
 
   /* ---------- narrower screens: canvas becomes the opening section ---------- */
   @media (max-width: 980px) {
     html:not(.in-figma) .bench { display: flex; flex-direction: column; }
-    html:not(.in-figma) .canvas { position: relative; top: 0; height: auto; min-height: min(88vh, 760px); padding: calc(var(--ruler) + 34px) 18px 34px calc(var(--ruler) + 16px); }
+    html:not(.in-figma) .canvas { align-self: stretch; min-width: 0; position: relative; top: 0; height: auto; min-height: min(88vh, 760px); padding: calc(var(--ruler) + 34px) 18px 34px calc(var(--ruler) + 16px); }
     html:not(.in-figma) .app { border-right: 0; border-top: 1px solid var(--line); min-height: 0; max-width: 640px; width: 100%; margin: 0 auto; }
     .cv-layers { flex-direction: column; }
     .lp { width: 100%; max-height: 420px; }
+    .xv { flex: none; }
+    .xv-view { flex: none; height: auto; max-height: min(62vh, 560px); }
+    .xv-world { margin: 26px 14px 30px; }
     .tb-file { display: none; }
     .tb-link span { display: none; }
     .tb-link { padding: 0 9px; }
