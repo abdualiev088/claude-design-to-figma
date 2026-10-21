@@ -202,7 +202,7 @@
       if (rows.length >= LIMIT) return;
       var abs = n.stackPositioning === 'ABSOLUTE';
       var tag = abs ? 'absolute' : n.stackMode === 'VERTICAL' || n.stackMode === 'HORIZONTAL' ? (n.stackWrap === 'WRAP' ? 'wrap' : 'auto') : '';
-      rows.push('<li class="' + (d === 0 ? 'top' : '') + '" style="padding-left:' + (12 + d * 16) + 'px">' + icon(layerIcon(n), 14) + '<span class="nm">' + esc((n.name || n.type).replace(/­/g, '')) + '</span>' + (tag ? '<span class="tg">' + tag + '</span>' : '') + '</li>');
+      rows.push('<li class="' + (d === 0 ? 'top' : '') + '" data-k="' + key(n.guid) + '" tabindex="-1" style="padding-left:' + (12 + d * 16) + 'px">' + icon(layerIcon(n), 14) + '<span class="nm">' + esc((n.name || n.type).replace(/­/g, '')) + '</span>' + (tag ? '<span class="tg">' + tag + '</span>' : '') + '</li>');
       var ks = kids[key(n.guid)] || [], cap = d === 0 ? 14 : d === 1 ? 6 : d === 2 ? 3 : 0;
       ks.slice(0, cap).forEach(function (c) { add(c, d + 1); });
       if (ks.length > cap && rows.length < LIMIT) rows.push('<li class="more" style="padding-left:' + (12 + (d + 1) * 16) + 'px">' + (ks.length - cap) + ' more inside</li>');
@@ -228,13 +228,192 @@
     return tops.map(function (t) { return { t: t.name, w: Math.round(t.size.x), h: Math.round(t.size.y) }; });
   }
 
+  // ---------- export preview: the converted output itself, with Figma-style hover and selection ----------
+  // The picture is the same SVG the ".svg" button downloads, built from the same capture as the Figma
+  // layers; the boxes come from the Figma payload, so hovering or clicking shows the real layer.
+  var XV = (function () {
+    var view = $('xvView'), world = $('xvWorld'), img = $('xvImg'), ov = $('xvOv'), pct = $('xvPct'), tree = $('lpTree');
+    var st = { s: 1, W: 0, H: 0, url: null, boxes: [], nodes: [], byKey: {}, sel: null, hov: null, auto: 'width' };
+    var hovEl = null, selEl = null, frameEls = [];
+    function el(cls, html) { var d = document.createElement('div'); d.className = cls; if (html) d.innerHTML = html; return d; }
+    function kOf(g) { return g.sessionID + ':' + g.localID; }
+
+    function nodesFrom(doc) {
+      var nc = doc && doc.nodeChanges || [], map = {}, out = [];
+      nc.forEach(function (n) { map[kOf(n.guid)] = n; });
+      nc.forEach(function (n) {
+        if (n.type === 'DOCUMENT' || n.type === 'CANVAS' || n.visible === false || !n.size) return;
+        var x = 0, y = 0, d = 0, p = n, top = n;
+        while (p && p.type !== 'CANVAS') { var t = p.transform || {}; x += t.m02 || 0; y += t.m12 || 0; d++; top = p; p = p.parentIndex ? map[kOf(p.parentIndex.guid)] : null; }
+        var al = n.stackPositioning === 'ABSOLUTE' ? 'absolute' : (n.stackMode === 'VERTICAL' || n.stackMode === 'HORIZONTAL') ? (n.stackWrap === 'WRAP' ? 'wrap' : 'auto layout') : '';
+        out.push({ k: kOf(n.guid), name: (n.name || n.type).replace(/­/g, ''), type: n.type, x: x, y: y, w: n.size.x, h: n.size.y, d: d, al: al, top: kOf(top.guid) });
+      });
+      return out;
+    }
+    function hit(wx, wy) {
+      var best = null;
+      for (var i = 0; i < st.nodes.length; i++) {
+        var n = st.nodes[i];
+        if (wx < n.x || wy < n.y || wx > n.x + n.w || wy > n.y + n.h) continue;
+        if (!best || n.d > best.d || (n.d === best.d && n.w * n.h < best.w * best.h)) best = n;
+      }
+      return best;
+    }
+    function place(box, n) {
+      if (!n) { box.style.display = 'none'; return; }
+      var s = st.s;
+      box.style.display = 'block';
+      box.style.left = n.x * s + 'px'; box.style.top = n.y * s + 'px';
+      box.style.width = Math.max(1, n.w * s) + 'px'; box.style.height = Math.max(1, n.h * s) + 'px';
+    }
+    function tagFor(n) {
+      var t = selEl.querySelector('.xv-tag');
+      t.innerHTML = '<b>' + esc(n.name) + '</b><span>' + Math.round(n.w) + ' × ' + Math.round(n.h) + (n.al ? ' · ' + n.al : '') + '</span>';
+      t.classList.toggle('below', n.y * st.s < 24);
+    }
+    function layout() {
+      var s = st.s;
+      world.style.width = Math.round(st.W * s) + 'px'; world.style.height = Math.round(st.H * s) + 'px';
+      st.boxes.forEach(function (b, i) {
+        var f = frameEls[i]; if (!f) return;
+        f.style.left = b.x * s + 'px'; f.style.top = b.y * s + 'px'; f.style.width = b.w * s + 'px'; f.style.height = b.h * s + 'px';
+      });
+      place(hovEl, st.hov && st.hov !== st.sel ? st.hov : null);
+      place(selEl, st.sel); if (st.sel) tagFor(st.sel);
+      pct.textContent = Math.round(s * 100) + '%';
+    }
+    function fitScale(mode) {
+      var cw = Math.max(120, view.clientWidth - 48), ch = Math.max(120, view.clientHeight - 70);
+      var s = cw / st.W; if (mode === 'all') s = Math.min(s, ch / st.H);
+      return Math.max(0.03, Math.min(1, s));
+    }
+    // zoom keeping the point under (ax, ay) — viewport coords inside the view — where it is
+    function zoomTo(s, ax, ay) {
+      s = Math.max(0.03, Math.min(4, s));
+      if (ax === undefined) { ax = view.clientWidth / 2; ay = view.clientHeight / 2; }
+      var wx = (view.scrollLeft + ax - world.offsetLeft) / st.s, wy = (view.scrollTop + ay - world.offsetTop) / st.s;
+      st.s = s; layout();
+      view.scrollLeft = wx * s + world.offsetLeft - ax; view.scrollTop = wy * s + world.offsetTop - ay;
+    }
+    function fit(mode) { st.auto = mode; st.s = fitScale(mode); layout(); view.scrollLeft = 0; view.scrollTop = 0; }
+    function toWorld(e) { var r = world.getBoundingClientRect(); return { x: (e.clientX - r.left) / st.s, y: (e.clientY - r.top) / st.s }; }
+
+    function rowFor(k) { return tree.querySelector('li[data-k="' + k + '"]'); }
+    function select(n, from) {
+      st.sel = n;
+      Array.prototype.forEach.call(tree.querySelectorAll('li.on'), function (li) { li.classList.remove('on'); li.removeAttribute('aria-current'); });
+      frameEls.forEach(function (f, i) { f.querySelector('.xv-fl').classList.toggle('on', !!n && st.boxes[i].k === n.top); });
+      layout();
+      if (!n) return;
+      var row = rowFor(n.k);
+      if (row) {
+        row.classList.add('on'); row.setAttribute('aria-current', 'true');
+        if (from === 'preview') { var top = row.offsetTop - tree.clientHeight / 2 + row.offsetHeight / 2; tree.scrollTo({ top: Math.max(0, top), behavior: reduceQ.matches ? 'auto' : 'smooth' }); }
+      }
+      if (from === 'tree') { // bring the layer into view if it is off screen
+        var s = st.s, x = n.x * s + world.offsetLeft, y = n.y * s + world.offsetTop;
+        var vis = x >= view.scrollLeft && y >= view.scrollTop && x + n.w * s <= view.scrollLeft + view.clientWidth && y + Math.min(n.h * s, view.clientHeight) <= view.scrollTop + view.clientHeight;
+        if (!vis) view.scrollTo({ left: Math.max(0, x - 40), top: Math.max(0, y - 60), behavior: reduceQ.matches ? 'auto' : 'smooth' });
+      }
+    }
+    function hover(n) { if (n === st.hov) return; st.hov = n; place(hovEl, n && n !== st.sel ? n : null); }
+
+    // pointer: hover = outline, click = select, mouse drag = pan, Ctrl/Cmd + wheel = zoom
+    var drag = null, panned = false, raf = 0, lastMove = null;
+    on(view, 'pointerdown', function (e) {
+      panned = false;
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      drag = { x: e.clientX, y: e.clientY, sl: view.scrollLeft, st: view.scrollTop, id: e.pointerId };
+    });
+    on(view, 'pointermove', function (e) {
+      if (drag) {
+        var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+        if (!panned && Math.abs(dx) + Math.abs(dy) > 4) { panned = true; view.classList.add('panning'); try { view.setPointerCapture(drag.id); } catch (er) {} hover(null); }
+        if (panned) { view.scrollLeft = drag.sl - dx; view.scrollTop = drag.st - dy; return; }
+      }
+      if (e.pointerType !== 'mouse') return;
+      lastMove = e;
+      if (!raf) raf = requestAnimationFrame(function () { raf = 0; var p = toWorld(lastMove); hover(hit(p.x, p.y)); });
+    });
+    function endDrag() { if (drag) { try { view.releasePointerCapture(drag.id); } catch (er) {} } drag = null; view.classList.remove('panning'); }
+    on(view, 'pointerup', endDrag); on(view, 'pointercancel', endDrag);
+    on(view, 'pointerleave', function () { if (!drag) hover(null); });
+    on(view, 'click', function (e) { if (panned) { panned = false; return; } var p = toWorld(e); select(hit(p.x, p.y), 'preview'); });
+    on(view, 'wheel', function (e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      var r = view.getBoundingClientRect();
+      st.auto = null; zoomTo(st.s * Math.exp(-e.deltaY * 0.0022), e.clientX - r.left, e.clientY - r.top);
+    }, { passive: false });
+    on(view, 'keydown', function (e) {
+      if (e.key === 'Escape') { select(null); return; }
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); st.auto = null; zoomTo(st.s * 1.25); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); st.auto = null; zoomTo(st.s / 1.25); }
+      else if (e.key === '0') { e.preventDefault(); fit('width'); }
+    });
+    on($('xvIn'), 'click', function () { st.auto = null; zoomTo(st.s * 1.25); });
+    on($('xvOut'), 'click', function () { st.auto = null; zoomTo(st.s / 1.25); });
+    on(pct, 'click', function () { fit('width'); });
+    on($('xvAll'), 'click', function () { fit('all'); });
+
+    // layers panel drives the preview too
+    function rowNode(li) { return li && li.dataset.k ? st.byKey[li.dataset.k] : null; }
+    on(tree, 'click', function (e) { var li = e.target.closest('li[data-k]'); if (!li) return; li.focus({ preventScroll: true }); select(rowNode(li), 'tree'); });
+    on(tree, 'mouseover', function (e) { var li = e.target.closest('li[data-k]'); hover(rowNode(li)); });
+    on(tree, 'mouseleave', function () { hover(null); });
+    on(tree, 'keydown', function (e) {
+      var li = e.target.closest('li[data-k]'); if (!li) return;
+      var rows = Array.prototype.slice.call(tree.querySelectorAll('li[data-k]')), i = rows.indexOf(li), next = null;
+      if (e.key === 'ArrowDown') next = rows[i + 1]; else if (e.key === 'ArrowUp') next = rows[i - 1];
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(rowNode(li), 'tree'); return; }
+      if (next) { e.preventDefault(); li.tabIndex = -1; next.tabIndex = 0; next.focus(); hover(rowNode(next)); }
+    });
+
+    function clear() {
+      if (st.url) { URL.revokeObjectURL(st.url); st.url = null; }
+      img.removeAttribute('src'); world.classList.remove('loaded'); ov.innerHTML = ''; frameEls = []; st.sel = st.hov = null;
+    }
+    function load(svg, boxes, doc) {
+      clear();
+      st.nodes = nodesFrom(doc); st.byKey = {};
+      st.nodes.forEach(function (n) { st.byKey[n.k] = n; });
+      // match each captured frame to its top-level Figma frame (same order, same offsets)
+      var tops = st.nodes.filter(function (n) { return n.d === 1; });
+      st.boxes = boxes.map(function (b, i) {
+        var t = tops.filter(function (n) { return Math.abs(n.x - b.x) < 2 && Math.abs(n.y - b.y) < 2; })[0] || tops[i];
+        return { name: t ? t.name : b.name, x: b.x, y: b.y, w: b.w, h: b.h, k: t ? t.k : '' };
+      });
+      var m = /width="([\d.]+)"\s+height="([\d.]+)"/.exec(svg.slice(0, 400));
+      st.W = m ? +m[1] : Math.max.apply(null, boxes.map(function (b) { return b.x + b.w; }).concat([1]));
+      st.H = m ? +m[2] : Math.max.apply(null, boxes.map(function (b) { return b.y + b.h; }).concat([1]));
+      st.boxes.forEach(function (b) {
+        var f = el('xv-frame', '<span class="xv-fl">' + icon('solar:frame-linear', 11) + '<span class="nm">' + esc(b.name) + '</span><span class="sz">' + Math.round(b.w) + ' × ' + Math.round(b.h) + '</span></span>');
+        ov.appendChild(f); frameEls.push(f);
+      });
+      hovEl = el('xv-hov'); selEl = el('xv-sel', '<i></i><i></i><i></i><i></i><span class="xv-tag"></span>');
+      ov.appendChild(hovEl); ov.appendChild(selEl);
+      var firstRow = tree.querySelector('li[data-k]'); if (firstRow) firstRow.tabIndex = 0;
+      $('xvSub').textContent = st.boxes.length > 1 ? st.boxes.length + ' frames · exactly what lands in Figma' : 'Exactly what lands in Figma';
+      if (svg) {
+        st.url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+        img.onload = function () { world.classList.add('loaded'); };
+        img.src = st.url;
+      }
+      fit('width');
+      if (motionOK) G.from(world, { opacity: 0, y: 14, duration: 0.5, ease: 'power3.out', clearProps: 'opacity,transform' });
+    }
+    function resize() { if (current === 'layers' && st.W && st.auto) { st.s = fitScale(st.auto); layout(); } }
+    cleanups.push(clear);
+    return { load: load, clear: clear, resize: resize };
+  })();
+
   // ---------- controller events ----------
   on(document, 'f2f:state', function (e) { onState(e.detail); });
   on(document, 'f2f:view', function (e) {
     var v = e.detail.view;
     canvas.classList.toggle('working', v === 'work');
     if (v === 'work') { canvas.classList.remove('finished'); if (current !== 'plan' && lastState) { canvas.classList.remove('working'); onState(lastState); canvas.classList.add('working'); } }
-    if (v === 'ready') { canvas.classList.remove('finished'); if (lastState) onState(lastState); }
+    if (v === 'ready') { canvas.classList.remove('finished'); XV.clear(); if (lastState) onState(lastState); }
   });
   on(document, 'f2f:done', function (e) {
     var d = e.detail;
@@ -242,15 +421,15 @@
     if (!d.ok || !d.doc) { canvas.classList.remove('finished'); return; }
     canvas.classList.add('finished');
     swap('layers', function () {
-      var tops = renderLayers(d.doc);
-      renderFrames($('framesMini'), tops.length ? tops : framesFor(lastState || { widths: [1440] }), { max: 6 });
+      renderLayers(d.doc);
+      XV.load(d.svg, d.boxes || [], d.doc);
     });
   });
   // re-fit the frames when the canvas changes size
   var roT = null;
   var ro = new ResizeObserver(function () {
     clearTimeout(roT);
-    roT = setTimeout(function () { if (current === 'plan' && lastState && lastState.has) renderFrames($('frames'), framesFor(lastState), { anim: false }); }, 150);
+    roT = setTimeout(function () { if (current === 'plan' && lastState && lastState.has) renderFrames($('frames'), framesFor(lastState), { anim: false }); XV.resize(); }, 150);
   });
   ro.observe(canvas); cleanups.push(function () { ro.disconnect(); });
 

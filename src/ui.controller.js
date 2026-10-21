@@ -169,7 +169,7 @@
     return w;
   }
 
-  var lastSvg = '', lastSvgName = 'design.svg', lastFig = null;
+  var lastSvg = '', lastSvgName = 'design.svg', lastFig = null, lastBoxes = [];
 
   $('go').onclick = async function () {
     var opts = { vh: Math.max(300, +$('optVH').value || 900), wait: Math.max(0, +$('optWait').value || 0), autoLayout: $('optAL').checked, expand: $('optExpand').checked, first: $('optFirst').checked, svgLines: !IN_FIGMA };
@@ -185,7 +185,7 @@
     $('step3').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
 
     var x = 0, missing = {}, total = 0, frames = 0, failed = 0, tries = 0, canvasNote = false, lastErr = '';
-    var svgRoots = [], svgImages = {}, imgSeq = 0, natFrames = []; lastFig = null;
+    var svgRoots = [], svgImages = {}, imgSeq = 0, natFrames = []; lastFig = null; lastSvg = ''; lastBoxes = [];
     var jobsTotal = pages.length * ws.length, jobsDone = 0;
 
     // Rename image ids so results from several captures can share one SVG
@@ -246,6 +246,7 @@
       setStatus('Packing layers…');
       await sleep(30);
       lastSvg = F2FSvg.render(svgRoots, svgImages);
+      lastBoxes = svgRoots.map(function (o) { return { name: o.tree.name, x: o.x, y: o.y, w: o.tree.w, h: o.tree.h }; });
       lastSvgName = (pages[0].path.replace(/\.html?$/i, '').split('/').pop() || 'design') + '.svg';
       if (natFrames.length) {
         setStatus('Building Figma frames and auto layout…');
@@ -263,7 +264,7 @@
     // In browser mode, count what actually goes to Figma (the payload), so every number on screen agrees.
     if (!IN_FIGMA && lastFig && lastFig.document) r.total = lastFig.document.nodeChanges.filter(function (n) { return n.type !== 'DOCUMENT' && n.type !== 'CANVAS'; }).length;
     view('done');
-    emit('done', { ok: r.ok, doc: !IN_FIGMA && lastFig ? lastFig.document : null, frames: r.frames, total: r.total });
+    emit('done', { ok: r.ok, doc: !IN_FIGMA && lastFig ? lastFig.document : null, frames: r.frames, total: r.total, svg: IN_FIGMA ? '' : lastSvg, boxes: lastBoxes });
     var badge = $('badge');
     badge.className = 'badge' + (r.ok ? '' : ' err');
     badge.innerHTML = r.ok ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
