@@ -613,6 +613,36 @@
 
   // Remove every auto layout setting (on frames and on their children). Child transforms are already
   // absolute offsets inside the parent, so the picture stays identical; only the flow behaviour goes.
+  // Backgrounds with several gradient layers (a glow over a base), positioned/sized radial gradients and
+  // stops with transparent ends are redrawn from the page's own CSS, so the paint matches the browser.
+  function captureApi(win) {
+    for (var w = win, i = 0; w && i < 6; i++) { try { if (w.F2FCapture && w.F2FCapture.gradientLayers) return w.F2FCapture; } catch (e) { return null; } if (w === w.parent) break; w = w.parent; }
+    return null;
+  }
+  function rebuildGradients(doc, frames) {
+    var api = null;
+    frames.some(function (f) { api = captureApi(f.element.ownerDocument.defaultView); return !!api; });
+    if (!api) return;
+    doc.nodeChanges.forEach(function (n) {
+      if (n.type !== 'FRAME' || !n.__els || !n.__els.length) return;
+      var el = n.__els[0], cs;
+      try { cs = el.ownerDocument.defaultView.getComputedStyle(el); } catch (e) { return; }
+      if (!cs.backgroundImage || cs.backgroundImage.indexOf('gradient(') < 0 || cs.backgroundClip === 'text') return;
+      var layers = api.gradientLayers(el);
+      if (!layers.length) return;
+      var old = n.fillPaints || [];
+      var oldGrad = old.filter(function (p) { return /^GRADIENT_/.test(p.type); });
+      var paints = [];
+      layers.forEach(function (L) {
+        if (L.type === 'CONIC') { var a = oldGrad.filter(function (p) { return p.type === 'GRADIENT_ANGULAR'; })[0]; if (a) paints.push(a); return; }
+        var t = L.gradientTransform;
+        paints.push({ type: L.type, stops: L.gradientStops.map(function (s) { return { color: { r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a }, position: s.position }; }),
+          opacity: 1, visible: true, blendMode: 'NORMAL', transform: { m00: t[0][0], m01: t[0][1], m02: t[0][2], m10: t[1][0], m11: t[1][1], m12: t[1][2] } });
+      });
+      if (!paints.length) return;
+      n.fillPaints = old.filter(function (p) { return !/^GRADIENT_/.test(p.type); }).concat(paints);
+    });
+  }
   // Scroll areas that were not unfolded ("Show full page" off, or small ones) keep their content inside.
   function clipScrollers(doc) {
     doc.nodeChanges.forEach(function (n) {
@@ -654,6 +684,7 @@
       })(res.document.nodeChanges);
       try { attachElements(res.document, res.trace, frames); } catch (e) { console.warn('trace', e); }
       try { clipScrollers(res.document); } catch (e) { console.warn('clip', e); }
+      try { rebuildGradients(res.document, frames); } catch (e) { console.warn('gradients', e); }
       tidy(res.document);
       if (useAL) {
         try { layoutRest(res.document); } catch (e) { console.warn('layout', e); }

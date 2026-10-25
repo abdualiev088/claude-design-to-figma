@@ -24,27 +24,43 @@
   }
 
   var _ctx = null;
-  function parseColor(str) {
+  var RGB_RE = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\s*\)$/;
+  var SRGB_RE = /^color\(srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)(?:\s*\/\s*([\d.e]+%?))?\s*\)$/;
+  function alphaOf(t) { return t === undefined ? 1 : (t.indexOf('%') > -1 ? parseFloat(t) / 100 : parseFloat(t)); }
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+  // Any CSS colour (rgb, hex, named, oklch, lab, color(), color-mix…) as sRGB 0..1, alpha included (may be 0).
+  function parseColorRaw(str) {
     if (!str) return null;
     str = str.trim();
-    if (str === 'transparent' || str === 'none') return null;
-    var m = str.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\s*\)$/);
-    if (!m) {
-      // color(srgb r g b / a), oklch(), named colors… let canvas normalise
-      if (!_ctx) _ctx = document.createElement('canvas').getContext('2d');
-      _ctx.fillStyle = '#000';
-      _ctx.fillStyle = str;
-      var n = _ctx.fillStyle;
-      if (/,\s*0\)$/.test(n)) return null;
-      if (n[0] === '#') {
-        return { r: parseInt(n.substr(1, 2), 16) / 255, g: parseInt(n.substr(3, 2), 16) / 255, b: parseInt(n.substr(5, 2), 16) / 255, a: 1 };
-      }
-      m = n.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\s*\)$/);
-      if (!m) return null;
-    }
-    var a = m[4] === undefined ? 1 : (m[4].indexOf('%') > -1 ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
-    if (a <= 0.001) return null;
-    return { r: +m[1] / 255, g: +m[2] / 255, b: +m[3] / 255, a: a };
+    if (str === 'none' || str === 'currentcolor') return null;
+    if (str === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
+    var m = str.match(RGB_RE);
+    if (m) return { r: +m[1] / 255, g: +m[2] / 255, b: +m[3] / 255, a: alphaOf(m[4]) };
+    if ((m = str.match(SRGB_RE))) return { r: clamp01(+m[1]), g: clamp01(+m[2]), b: clamp01(+m[3]), a: alphaOf(m[4]) };
+    if (!_ctx) _ctx = document.createElement('canvas').getContext('2d');
+    // modern colour spaces: ask the browser to convert to sRGB (relative colour syntax)
+    _ctx.fillStyle = '#010203';
+    _ctx.fillStyle = 'color(from ' + str + ' srgb r g b / alpha)';
+    var n = _ctx.fillStyle;
+    if ((m = n.match(SRGB_RE))) return { r: clamp01(+m[1]), g: clamp01(+m[2]), b: clamp01(+m[3]), a: alphaOf(m[4]) };
+    _ctx.fillStyle = '#010203';
+    _ctx.fillStyle = str;
+    n = _ctx.fillStyle;
+    if (n === '#010203' && !/^#010203$/i.test(str)) return null; // not a colour
+    if (n[0] === '#') return { r: parseInt(n.substr(1, 2), 16) / 255, g: parseInt(n.substr(3, 2), 16) / 255, b: parseInt(n.substr(5, 2), 16) / 255, a: 1 };
+    if ((m = n.match(RGB_RE))) return { r: +m[1] / 255, g: +m[2] / 255, b: +m[3] / 255, a: alphaOf(m[4]) };
+    if ((m = n.match(SRGB_RE))) return { r: clamp01(+m[1]), g: clamp01(+m[2]), b: clamp01(+m[3]), a: alphaOf(m[4]) };
+    // last resort: paint one pixel and read it back
+    try {
+      var cv = document.createElement('canvas'); cv.width = cv.height = 1;
+      var x = cv.getContext('2d'); x.fillStyle = str; x.fillRect(0, 0, 1, 1);
+      var d = x.getImageData(0, 0, 1, 1).data;
+      return { r: d[0] / 255, g: d[1] / 255, b: d[2] / 255, a: d[3] / 255 };
+    } catch (e) { return null; }
+  }
+  function parseColor(str) {
+    var c = parseColorRaw(str);
+    return c && c.a > 0.001 ? c : null;
   }
   function solid(c) { return { type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }; }
 
@@ -58,7 +74,7 @@
         if (/^-?[\d.]+(%|px)?$/.test(t)) positions.push(t);
         else colTok = (colTok ? colTok + ' ' : '') + t;
       });
-      var c = parseColor(colTok);
+      var c = parseColorRaw(colTok);
       if (!c) return; // interpolation hints etc.
       if (positions.length === 0) stops.push({ color: c, pos: null });
       positions.forEach(function (pp) { stops.push({ color: c, pos: pp }); });
@@ -78,14 +94,70 @@
       var a = stops[i - 1].p, b = stops[j].p;
       for (var k = i; k < j; k++) stops[k].p = a + (b - a) * (k - i + 1) / (j - i + 1);
     }
+    // a fully transparent stop fades the neighbouring colour (CSS interpolates premultiplied)
+    stops.forEach(function (s, i) {
+      if (s.color.a > 0.001) return;
+      var nb = null;
+      for (var d = 1; d < stops.length && !nb; d++) {
+        var a = stops[i - d], b = stops[i + d];
+        if (a && a.color.a > 0.001) nb = a.color; else if (b && b.color.a > 0.001) nb = b.color;
+      }
+      if (nb) s.color = { r: nb.r, g: nb.g, b: nb.b, a: 0 };
+    });
     var last = 0;
     return stops.map(function (s) {
       var p = Math.max(last, Math.min(1, Math.max(0, s.p))); last = p;
       return { color: { r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a }, position: p };
     });
   }
+  // Browsers blend gradients made of modern colours (oklch, lab, color()…) in Oklab, and every gradient with
+  // premultiplied alpha; Figma blends straight sRGB. Extra stops computed the browser's way bridge the gap.
+  function lin(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function gam(c) { c = Math.max(0, Math.min(1, c)); return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; }
+  function toOklab(c) {
+    var r = lin(c.r), g = lin(c.g), b = lin(c.b);
+    var l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+  }
+  function fromOklab(L) {
+    var l = Math.pow(L[0] + 0.3963377774 * L[1] + 0.2158037573 * L[2], 3), m = Math.pow(L[0] - 0.1055613458 * L[1] - 0.0638541728 * L[2], 3), s = Math.pow(L[0] - 0.0894841775 * L[1] - 1.2914855480 * L[2], 3);
+    return { r: gam(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), g: gam(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), b: gam(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s) };
+  }
+  function mixColor(a, b, t, space) {
+    var al = a.a + (b.a - a.a) * t;
+    var ok = space !== 'srgb';
+    var A = ok ? toOklab(a) : [a.r, a.g, a.b], B = ok ? toOklab(b) : [b.r, b.g, b.b], o = [];
+    if (space === 'oklch') { // polar: lightness and chroma blend, hue takes the shorter way round
+      var ca = Math.hypot(A[1], A[2]), cb = Math.hypot(B[1], B[2]), ha = Math.atan2(A[2], A[1]), hb = Math.atan2(B[2], B[1]);
+      if (ca < 1e-4) ha = hb; if (cb < 1e-4) hb = ha;
+      var dh = hb - ha; if (dh > Math.PI) dh -= 2 * Math.PI; if (dh < -Math.PI) dh += 2 * Math.PI;
+      var L = al > 1e-6 ? (A[0] * a.a + (B[0] * b.a - A[0] * a.a) * t) / al : A[0] + (B[0] - A[0]) * t;
+      var C = ca + (cb - ca) * t, H = ha + dh * t;
+      o = [L, C * Math.cos(H), C * Math.sin(H)];
+    } else for (var i = 0; i < 3; i++) o.push(al > 1e-6 ? (A[i] * a.a + (B[i] * b.a - A[i] * a.a) * t) / al : A[i] + (B[i] - A[i]) * t);
+    var c = ok ? fromOklab(o) : { r: o[0], g: o[1], b: o[2] };
+    return { r: c.r, g: c.g, b: c.b, a: al };
+  }
+  function gradientSpace(args) {
+    var m = args.match(/\bin\s+([a-z0-9-]+)/);
+    if (m) return m[1] === 'srgb' ? 'srgb' : /^(oklch|lch|hsl|hwb)$/.test(m[1]) ? 'oklch' : 'oklab';
+    return /\b(oklch|oklab|lab|lch|color)\(/.test(args) ? 'oklab' : 'srgb';
+  }
+  function densify(stops, space) {
+    if (stops.length < 2) return stops;
+    var out = [stops[0]];
+    for (var i = 1; i < stops.length; i++) {
+      var a = stops[i - 1], b = stops[i], dp = b.position - a.position;
+      var needs = dp > 0.001 && (space !== 'srgb' || Math.abs(a.color.a - b.color.a) > 0.01);
+      if (needs) for (var k = 1; k < 8; k++) { var t = k / 8; out.push({ color: mixColor(a.color, b.color, t, space), position: a.position + dp * t }); }
+      out.push(b);
+    }
+    return out;
+  }
   function parseLinear(args, w, h) {
     var parts = splitTop(args, ',');
+    parts[0] = parts[0].replace(/(^|\s)in\s+[a-z0-9-]+(\s+(shorter|longer|increasing|decreasing)\s+hue)?/, ' ').trim();
+    if (!parts[0]) parts.shift();
     var angle = 180; // default: to bottom
     var first = parts[0].trim();
     if (/^-?[\d.]+(deg|turn|rad|grad)$/.test(first)) {
@@ -113,32 +185,70 @@
     ];
     var stops = finalizeStops(parseStops(parts), L);
     if (stops.length < 2) return null;
+    stops = densify(stops, gradientSpace(args));
     return { type: 'GRADIENT_LINEAR', gradientTransform: transform, gradientStops: stops };
   }
   function parseRadial(args, w, h) {
     var parts = splitTop(args, ',');
-    var cx = 0.5, cy = 0.5;
-    var first = parts[0];
-    if (!parseColor(splitTop(first, ' ')[0])) {
-      var at = first.split(/\sat\s|^at\s/)[1];
+    parts[0] = parts[0].replace(/(^|\s)in\s+[a-z0-9-]+(\s+(shorter|longer|increasing|decreasing)\s+hue)?/, ' ').trim();
+    if (!parts[0]) parts.shift();
+    var cx = 0.5 * w, cy = 0.5 * h, shape = 'ellipse', size = 'farthest-corner', explicit = null;
+    var first = parts[0].trim();
+    if (!parseColorRaw(splitTop(first, ' ')[0])) {
+      var sp = first.split(/(?:^|\s)at\s/), geo = (sp[0] || '').trim(), at = sp[1];
       if (at) {
         var toks = at.trim().split(/\s+/);
         var kw = { left: 0, center: 0.5, right: 1, top: 0, bottom: 1 };
-        function pos(t, size) { if (t in kw) return kw[t]; if (/%$/.test(t)) return parseFloat(t) / 100; return parseFloat(t) / size; }
-        if (toks[0]) { if (toks[0] === 'top' || toks[0] === 'bottom') { cy = kw[toks[0]]; if (toks[1]) cx = pos(toks[1], w); } else { cx = pos(toks[0], w); if (toks[1]) cy = pos(toks[1], h); } }
+        var len = function (t, L) { if (t in kw) return kw[t] * L; if (/%$/.test(t)) return parseFloat(t) / 100 * L; return parseFloat(t); };
+        if (toks[0] === 'top' || toks[0] === 'bottom') { cy = len(toks[0], h); if (toks[1]) cx = len(toks[1], w); }
+        else { if (toks[0]) cx = len(toks[0], w); if (toks[1]) cy = len(toks[1], h); }
       }
+      geo.split(/\s+/).filter(Boolean).forEach(function (t) {
+        if (t === 'circle' || t === 'ellipse') shape = t;
+        else if (/^(closest|farthest)-(side|corner)$/.test(t)) size = t;
+        else (explicit = explicit || []).push(t);
+      });
       parts.shift();
     }
-    // farthest-corner ellipse approximation
-    var rx = Math.max(cx, 1 - cx) * Math.SQRT2, ry = Math.max(cy, 1 - cy) * Math.SQRT2;
-    var stops = finalizeStops(parseStops(parts), Math.max(w, h));
+    var dl = cx, dr = w - cx, dt = cy, db = h - cy, rx, ry;
+    if (explicit) {
+      rx = /%$/.test(explicit[0]) ? parseFloat(explicit[0]) / 100 * w : parseFloat(explicit[0]);
+      ry = explicit[1] ? (/%$/.test(explicit[1]) ? parseFloat(explicit[1]) / 100 * h : parseFloat(explicit[1])) : rx;
+      if (explicit.length === 1) shape = 'circle';
+    } else {
+      var sx = size.indexOf('closest') === 0 ? Math.min(Math.abs(dl), Math.abs(dr)) : Math.max(Math.abs(dl), Math.abs(dr));
+      var sy = size.indexOf('closest') === 0 ? Math.min(Math.abs(dt), Math.abs(db)) : Math.max(Math.abs(dt), Math.abs(db));
+      if (shape === 'circle') {
+        var r = /side$/.test(size) ? (size.indexOf('closest') === 0 ? Math.min(sx, sy) : Math.max(sx, sy)) : Math.sqrt(sx * sx + sy * sy);
+        rx = ry = r;
+      } else if (/side$/.test(size)) { rx = sx; ry = sy; }
+      else { rx = sx * Math.SQRT2; ry = sy * Math.SQRT2; }
+    }
+    rx = Math.max(rx, 0.5); ry = Math.max(ry, 0.5);
+    var stops = finalizeStops(parseStops(parts), rx);
     if (stops.length < 2) return null;
-    // map node space -> gradient space where centre=(0.5,0.5), radius=0.5
+    stops = densify(stops, gradientSpace(args));
+    // node space (0..1) -> gradient space where the ellipse is centred at (0.5,0.5) with radius 0.5
     var transform = [
-      [0.5 / rx, 0, 0.5 - cx * 0.5 / rx],
-      [0, 0.5 / ry, 0.5 - cy * 0.5 / ry]
+      [w / (2 * rx), 0, 0.5 - cx / (2 * rx)],
+      [0, h / (2 * ry), 0.5 - cy / (2 * ry)]
     ];
     return { type: 'GRADIENT_RADIAL', gradientTransform: transform, gradientStops: stops };
+  }
+  // All gradient layers of an element's background, bottom layer first (Figma order).
+  function gradientLayers(el) {
+    var win = el.ownerDocument.defaultView, cs = win.getComputedStyle(el), bi = cs.backgroundImage;
+    if (!bi || bi.indexOf('gradient(') < 0) return [];
+    var r = el.getBoundingClientRect(), w = r.width || 1, h = r.height || 1, out = [];
+    splitTop(bi, ',').forEach(function (L) {
+      var m, f = null;
+      L = L.trim();
+      if ((m = L.match(/^(?:-webkit-)?(repeating-)?linear-gradient\(([\s\S]*)\)$/))) f = parseLinear(m[2], w, h);
+      else if ((m = L.match(/^(?:-webkit-)?(repeating-)?radial-gradient\(([\s\S]*)\)$/))) f = parseRadial(m[2], w, h);
+      else if (/conic-gradient\(/.test(L)) f = { type: 'CONIC', css: L };
+      if (f) out.push(f);
+    });
+    return out.reverse();
   }
 
   // ---------- shadows ----------
@@ -1031,6 +1141,7 @@
 
   global.F2FCapture = {
     prepareAndRun: prepareAndRun,
+    gradientLayers: gradientLayers,
     run: function (win, opts) {
       var c = new Capturer(win, opts);
       c.sx = win.scrollX || 0; c.sy = win.scrollY || 0;
