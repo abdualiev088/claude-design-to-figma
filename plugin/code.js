@@ -202,6 +202,18 @@ function buildSvg(svg, w, h, name) {
   }
 }
 
+// background-clip:text: the gradient is measured on the clipping element's box; re-express it on this text box
+function textPaint(st, d) {
+  var g = st.clipGrad;
+  if (g && g.layers && g.layers.length && d.w > 0 && d.h > 0) {
+    var L = g.layers[g.layers.length - 1], T = L.gradientTransform, b = g.box;
+    var ax = d.w / b.w, cx = (d.x - b.x) / b.w, ay = d.h / b.h, cy = (d.y - b.y) / b.h;
+    return { type: L.type, gradientStops: L.gradientStops.map(function (s) { return { color: { r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a }, position: s.position }; }),
+      gradientTransform: [[T[0][0] * ax, T[0][1] * ay, T[0][0] * cx + T[0][1] * cy + T[0][2]], [T[1][0] * ax, T[1][1] * ay, T[1][0] * cx + T[1][1] * cy + T[1][2]]] };
+  }
+  return { type: 'SOLID', color: { r: st.color.r, g: st.color.g, b: st.color.b }, opacity: st.color.a };
+}
+
 function buildText(d) {
   var t = figma.createText();
   var chars = d.segments.map(function (s) { return s.text; }).join('');
@@ -215,7 +227,7 @@ function buildText(d) {
       var st = s.style;
       t.setRangeFontName(pos, end, FONT_CACHE[key(st)] || first);
       t.setRangeFontSize(pos, end, round2(st.size));
-      t.setRangeFills(pos, end, [{ type: 'SOLID', color: { r: st.color.r, g: st.color.g, b: st.color.b }, opacity: st.color.a }]);
+      t.setRangeFills(pos, end, [textPaint(st, d)]);
       if (st.ls) t.setRangeLetterSpacing(pos, end, { value: round2(st.ls), unit: 'PIXELS' });
       if (st.lh) t.setRangeLineHeight(pos, end, { value: round2(st.lh), unit: 'PIXELS' });
       if (st.deco !== 'NONE') t.setRangeTextDecoration(pos, end, st.deco);
