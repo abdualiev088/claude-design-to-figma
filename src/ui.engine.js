@@ -623,6 +623,31 @@
     var api = null;
     frames.some(function (f) { api = captureApi(f.element.ownerDocument.defaultView); return !!api; });
     if (!api) return;
+    var byId = {}; doc.nodeChanges.forEach(function (n) { byId[n.guid.sessionID + ':' + n.guid.localID] = n; });
+    function absInTop(n) { // position inside its top-level frame (= page coordinates of the captured document)
+      var x = 0, y = 0, p = n;
+      while (p && p.parentIndex) { var par = byId[p.parentIndex.guid.sessionID + ':' + p.parentIndex.guid.localID]; if (!par || par.type === 'CANVAS') break; x += (p.transform && p.transform.m02) || 0; y += (p.transform && p.transform.m12) || 0; p = par; }
+      return { x: x, y: y };
+    }
+    // text painted through background-clip:text (gradient), or coloured by -webkit-text-fill-color
+    doc.nodeChanges.forEach(function (n) {
+      if (n.type !== 'TEXT' || !n.__els || !n.__els.length || !n.size) return;
+      var el = n.__els[0];
+      if (el && el.nodeType === 3) el = el.parentElement;
+      if (!el || el.nodeType !== 1) return;
+      var c = null; try { c = api.textColor(el); } catch (e) {}
+      if (c && c.a > 0.001) {
+        var cur = (n.fillPaints || [])[0];
+        if (cur && cur.type === 'SOLID' && cur.color && (Math.abs(cur.color.r - c.r) + Math.abs(cur.color.g - c.g) + Math.abs(cur.color.b - c.b) > 0.02)) n.fillPaints = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b, a: 1 }, opacity: c.a, visible: true, blendMode: 'NORMAL' }];
+        return;
+      }
+      var g = null; try { g = api.clipGradientFor(el); } catch (e) {}
+      if (!g) return;
+      var L = g.layers[g.layers.length - 1], T = L.gradientTransform, b = g.box, a = absInTop(n), w = n.size.x, h = n.size.y;
+      var ax = w / b.w, cx = (a.x - b.x) / b.w, ay = h / b.h, cy = (a.y - b.y) / b.h;
+      n.fillPaints = [{ type: L.type, stops: L.gradientStops.map(function (s) { return { color: { r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a }, position: s.position }; }), opacity: 1, visible: true, blendMode: 'NORMAL',
+        transform: { m00: T[0][0] * ax, m01: T[0][1] * ay, m02: T[0][0] * cx + T[0][1] * cy + T[0][2], m10: T[1][0] * ax, m11: T[1][1] * ay, m12: T[1][0] * cx + T[1][1] * cy + T[1][2] } }];
+    });
     doc.nodeChanges.forEach(function (n) {
       if (n.type !== 'FRAME' || !n.__els || !n.__els.length) return;
       var el = n.__els[0], cs;

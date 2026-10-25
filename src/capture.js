@@ -276,7 +276,34 @@
   }
 
   // ---------- fonts ----------
-  function fontSpec(cs, scale) {
+  // Text painted by its own (or an ancestor's) background through `background-clip: text`.
+  function isTextClip(cs) { return /text/.test(cs.backgroundClip || '') || /text/.test(cs.webkitBackgroundClip || ''); }
+  function clipGradientFor(el) {
+    for (var o = el, i = 0; o && o.nodeType === 1 && i < 8; o = o.parentElement, i++) {
+      var w = o.ownerDocument.defaultView, ocs = w.getComputedStyle(o);
+      if (!isTextClip(ocs)) continue;
+      var layers = gradientLayers(o).filter(function (f) { return f.type !== 'CONIC'; });
+      if (!layers.length) return null;
+      var r = o.getBoundingClientRect();
+      return { layers: layers, box: { x: r.left + (w.scrollX || 0), y: r.top + (w.scrollY || 0), w: r.width || 1, h: r.height || 1 } };
+    }
+    return null;
+  }
+  function textColor(cs) {
+    var fill = cs.webkitTextFillColor;
+    return parseColorRaw(fill && fill !== cs.color ? fill : cs.color);
+  }
+  function fontSpec(cs, scale, el) {
+    var st = fontSpecBase(cs, scale);
+    var c = textColor(cs);
+    if (c && c.a > 0.001) st.color = c;
+    else if (el) {
+      var g = clipGradientFor(el);
+      if (g) { st.clipGrad = g; st.color = g.layers[g.layers.length - 1].gradientStops[0].color; }
+    }
+    return st;
+  }
+  function fontSpecBase(cs, scale) {
     var fams = cs.fontFamily.split(',').map(function (f) { return f.trim().replace(/^["']|["']$/g, ''); }).filter(Boolean);
     var lh = cs.lineHeight === 'normal' ? null : px(cs.lineHeight) * scale;
     var ls = cs.letterSpacing === 'normal' ? 0 : px(cs.letterSpacing) * scale;
@@ -452,7 +479,7 @@
         if (c.nodeType === 3) {
           var cs = self.cs(node);
           var t = collapseWS(c.nodeValue, cs.whiteSpace);
-          if (t) segs.push({ text: t, style: fontSpec(cs, scale), href: node.tagName === 'A' ? node.href : null });
+          if (t) segs.push({ text: t, style: fontSpec(cs, scale, node), href: node.tagName === 'A' ? node.href : null });
         } else if (c.nodeType === 1) {
           if (self.cs(c).display === 'none') continue;
           if (c.tagName === 'BR') segs.push({ text: '\n', style: fontSpec(self.cs(node), scale) });
@@ -540,7 +567,7 @@
     nodes.forEach(function (tn) {
       var pe = tn.parentElement; if (!pe) return;
       var pcs = cap.cs(pe); if (pcs.display === 'none' || pcs.visibility === 'hidden') return;
-      var st = fontSpec(pcs, scale), text = tn.nodeValue, re = /\S+/g, m;
+      var st = fontSpec(pcs, scale, pe), text = tn.nodeValue, re = /\S+/g, m;
       while ((m = re.exec(text))) {
         r.setStart(tn, m.index); r.setEnd(tn, m.index + m[0].length);
         var rects = r.getClientRects(); if (!rects.length) continue;
@@ -600,7 +627,7 @@
     var scale = this._scale || 1;
     var txt = collapseWS(textNode.nodeValue, cs.whiteSpace).trim();
     if (!txt) return;
-    var node = this.makeText(parentEl, cs, range, [{ text: txt, style: fontSpec(cs, scale) }], scale);
+    var node = this.makeText(parentEl, cs, range, [{ text: txt, style: fontSpec(cs, scale, parentEl) }], scale);
     if (node) { node.autoResize = lineCount(range) > 1 ? 'HEIGHT' : 'WIDTH_AND_HEIGHT'; node.x = range.getBoundingClientRect().left + this.sx; node.w = range.getBoundingClientRect().width + 1; parentNode.children.push(node); }
   };
 
@@ -640,7 +667,7 @@
   };
 
   Capturer.prototype.decorate = function (node, el, cs, rect, scale) {
-    var fills = this.backgroundFills(el, cs, rect, scale, false);
+    var fills = isTextClip(cs) ? [] : this.backgroundFills(el, cs, rect, scale, false); // clipped to the text: painted on the glyphs instead
     if (fills.length) node.fills = fills;
     // borders
     var sides = ['Top', 'Right', 'Bottom', 'Left'], W = {}, col = null, dashed = false, any = false;
@@ -1042,7 +1069,12 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   // Move/scale a captured subtree (used for content of embedded frames).
-  function transformTree(n, s, ox, oy) {
+  var _tt = 0;
+  function moveClipBox(st, s, ox, oy, tok) { var b = st && st.clipGrad && st.clipGrad.box; if (!b || b.__tt === tok) return; b.__tt = tok; b.x = ox + b.x * s; b.y = oy + b.y * s; b.w *= s; b.h *= s; }
+  function transformTree(n, s, ox, oy, tok) {
+    if (tok === undefined) tok = ++_tt;
+    if (n.segments) n.segments.forEach(function (g) { moveClipBox(g.style, s, ox, oy, tok); });
+    if (n.lines) n.lines.forEach(function (L) { L.runs.forEach(function (r) { moveClipBox(r.st, s, ox, oy, tok); }); });
     n.x = ox + n.x * s; n.y = oy + n.y * s; n.w *= s; n.h *= s;
     if (s !== 1) {
       if (n.segments) n.segments.forEach(function (g) { g.style.size *= s; if (g.style.lh) g.style.lh *= s; if (g.style.ls) g.style.ls *= s; });
@@ -1056,10 +1088,14 @@
       L.x = ox + L.x * s; L.baseline = oy + L.baseline * s;
       L.runs.forEach(function (r) { r.x = ox + r.x * s; if (s !== 1) { r.st.size *= s; if (r.st.ls) r.st.ls *= s; } });
     });
-    if (n.children) n.children.forEach(function (c) { transformTree(c, s, ox, oy); });
+    if (n.children) n.children.forEach(function (c) { transformTree(c, s, ox, oy, tok); });
   }
   // Shift a tree's absolute coordinates (no scaling)
-  function shiftTree(n, dx, dy) { n.x += dx; n.y += dy; if (n.lines) n.lines.forEach(function (L) { L.x += dx; L.baseline += dy; L.runs.forEach(function (r) { r.x += dx; }); }); if (n.children) n.children.forEach(function (c) { shiftTree(c, dx, dy); }); }
+  function shiftTree(n, dx, dy, tok) {
+    if (tok === undefined) tok = ++_tt;
+    if (n.segments) n.segments.forEach(function (g) { moveClipBox(g.style, 1, dx, dy, tok); });
+    if (n.lines) n.lines.forEach(function (L) { L.runs.forEach(function (r) { moveClipBox(r.st, 1, dx, dy, tok); }); });
+    n.x += dx; n.y += dy; if (n.lines) n.lines.forEach(function (L) { L.x += dx; L.baseline += dy; L.runs.forEach(function (r) { r.x += dx; }); }); if (n.children) n.children.forEach(function (c) { shiftTree(c, dx, dy, tok); }); }
 
   function frameDocs(win, out) {
     out = out || [];
@@ -1142,6 +1178,8 @@
   global.F2FCapture = {
     prepareAndRun: prepareAndRun,
     gradientLayers: gradientLayers,
+    clipGradientFor: clipGradientFor,
+    textColor: function (el) { return textColor(el.ownerDocument.defaultView.getComputedStyle(el)); },
     run: function (win, opts) {
       var c = new Capturer(win, opts);
       c.sx = win.scrollX || 0; c.sy = win.scrollY || 0;

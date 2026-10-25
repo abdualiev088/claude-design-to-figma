@@ -129,10 +129,10 @@
     if (c === 'TITLE') return t.replace(/(^|\s)(\S)/g, function (m, a, b) { return a + b.toUpperCase(); });
     return t;
   }
-  function fontAttrs(st) {
+  function fontAttrs(st, fillAttr) {
     var fam = st.families.map(function (f) { return /[\s,]/.test(f) ? "'" + f + "'" : f; }).join(', ');
     return ' font-family="' + esc(fam) + '" font-size="' + n2(st.size) + '" font-weight="' + st.weight + '"' + (st.italic ? ' font-style="italic"' : '') +
-      ' fill="' + rgb(st.color) + '"' + (st.color.a < 1 ? ' fill-opacity="' + n2(st.color.a) + '"' : '') +
+      (fillAttr || (' fill="' + rgb(st.color) + '"' + (st.color.a < 1 ? ' fill-opacity="' + n2(st.color.a) + '"' : ''))) +
       (st.ls ? ' letter-spacing="' + n2(st.ls) + '"' : '') +
       (st.deco === 'UNDERLINE' ? ' text-decoration="underline"' : st.deco === 'STRIKETHROUGH' ? ' text-decoration="line-through"' : '');
   }
@@ -144,12 +144,20 @@
       var st0 = n.segments[0].style, lh = st0.lh || st0.size * 1.2;
       lines = [{ x: n.x, baseline: n.y + (lh - st0.size * 1.2) / 2 + st0.size * 0.97, runs: [{ text: n.segments.map(function (s) { return s.text; }).join('').replace(/\n/g, ' '), st: st0, x: n.x }] }];
     }
+    var self = this, gradCache = [];
+    // background-clip:text — the gradient spans the clipping element's box, painted onto the glyphs
+    function fillFor(st) {
+      var g = st.clipGrad; if (!g || !g.layers || !g.layers.length) return null;
+      for (var i = 0; i < gradCache.length; i++) if (gradCache[i][0] === g) return gradCache[i][1];
+      var f = self.paintAttr(g.layers[g.layers.length - 1], g.box);
+      gradCache.push([g, f]); return f;
+    }
     var out = lines.map(function (L) {
       var first = L.runs[0];
       var tspans = L.runs.map(function (r, i) {
-        return '<tspan' + (i === 0 ? ' x="' + n2(r.x) + '" y="' + n2(L.baseline) + '"' : '') + fontAttrs(r.st) + '>' + esc(caseText(r.text, r.st.tcase)) + '</tspan>';
+        return '<tspan' + (i === 0 ? ' x="' + n2(r.x) + '" y="' + n2(L.baseline) + '"' : '') + fontAttrs(r.st, fillFor(r.st)) + '>' + esc(caseText(r.text, r.st.tcase)) + '</tspan>';
       }).join('');
-      return '<text xml:space="preserve"' + fontAttrs(first.st) + '>' + tspans + '</text>';
+      return '<text xml:space="preserve"' + fontAttrs(first.st, fillFor(first.st)) + '>' + tspans + '</text>';
     });
     var op = n.opacity !== undefined && n.opacity < 1 ? ' opacity="' + n2(n.opacity) + '"' : '';
     if (out.length === 1) return out[0].replace('<text ', '<text id="' + id + '"' + op + ' ');
