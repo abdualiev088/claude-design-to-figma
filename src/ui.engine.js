@@ -686,14 +686,19 @@
     }
     return s;
   }
-  var TEXT_KEEP = { advance: 1, rotation: 1, firstCharacter: 1, endCharacter: 1, commandsBlob: 1, styleId: 1, styleID: 1, indentationLevel: 1, listStartOffset: 1, glyphIndex: 1, characterIndex: 1 };
-  function scaleNums(o, s) {
-    if (!o || typeof o !== 'object' || ArrayBuffer.isView(o)) return;
-    for (var k in o) {
-      if (TEXT_KEEP[k]) continue;
-      if (typeof o[k] === 'number') o[k] *= s;
-      else if (o[k] && typeof o[k] === 'object') scaleNums(o[k], s);
-    }
+  // Only the measured lengths in the text layout are scaled; indices, ids, weights and ratios stay as they are.
+  function scaleDerived(dt, s) {
+    function v(o) { if (o) { if (typeof o.x === 'number') o.x *= s; if (typeof o.y === 'number') o.y *= s; } }
+    function r(o) { if (o) { ['x', 'y', 'w', 'h'].forEach(function (k) { if (typeof o[k] === 'number') o[k] *= s; }); } }
+    v(dt.layoutSize);
+    if (typeof dt.truncatedHeight === 'number') dt.truncatedHeight *= s;
+    (dt.baselines || []).forEach(function (b) { v(b.position); ['width', 'lineY', 'lineHeight', 'lineAscent'].forEach(function (k) { if (typeof b[k] === 'number') b[k] *= s; }); });
+    (dt.glyphs || []).forEach(function (g) { v(g.position); if (typeof g.fontSize === 'number') g.fontSize *= s; });
+    (dt.decorations || []).forEach(function (d) { (d.rects || []).forEach(r); });
+    (dt.blockquotes || []).forEach(function (q) { r(q.verticalBar); r(q.quoteMarkBounds); });
+    (dt.hyperlinkBoxes || []).forEach(function (h) { r(h.bounds); });
+    (dt.mentionBoxes || []).forEach(function (m) { r(m.bounds); });
+    if (Array.isArray(dt.logicalIndexToCharacterOffsetMap)) dt.logicalIndexToCharacterOffsetMap = dt.logicalIndexToCharacterOffsetMap.map(function (x) { return x * s; });
   }
   function scaleStyle(st, s) {
     if (typeof st.fontSize === 'number') st.fontSize *= s;
@@ -711,7 +716,7 @@
       scaleStyle(n, s);
       var tbl = n.textData && n.textData.styleOverrideTable || n.styleOverrideTable;
       (tbl || []).forEach(function (st) { scaleStyle(st, s); });
-      if (n.derivedTextData) scaleNums(n.derivedTextData, s);
+      if (n.derivedTextData) scaleDerived(n.derivedTextData, s);
     });
   }
   // Scroll areas that were not unfolded ("Show full page" off, or small ones) keep their content inside.
@@ -733,42 +738,61 @@
     tidy: tidy,
     missingFonts: {},
     frames: nativeFrames,
+    lastError: '',
     convert: async function (frames, canvasName, opts) {
       opts = opts || {};
       var useAL = opts.autoLayout !== false;
       if (!frames.length || !window.F2FFigit) return null;
-      F2FNative.missingFonts = {};
+      F2FNative.missingFonts = {}; F2FNative.lastError = ''; F2FNative.skipped = [];
       var chars = textChars(frames);
       var fallback = F2FFigit.createFontsourceLoader();
-      var conv = F2FFigit.createFigmaConverter({ fontLoader: googleFontLoader(chars, fallback), trace: true });
-      var res = await conv.convert(frames.length > 1 ? { frames: frames, canvasName: canvasName || 'Claude Design' } : frames[0]);
-      // Fonts Figma doesn't know by that name (system-ui, sans-serif, Segoe UI…) get the stand-in's name.
-      var renamed = false; void renamed;
-      (function walk(o) {
-        if (!o || typeof o !== 'object') return;
-        if (ArrayBuffer.isView(o)) return;
-        if (typeof o.family === 'string') {
-          var a = FONT_ALIAS[o.family.replace(/['"]/g, '').trim().toLowerCase()];
-          if (a && a[1]) { o.family = a[1]; if ('postscript' in o) o.postscript = ''; renamed = true; }
+      var loader = googleFontLoader(chars, fallback);
+      // full = every clean-up pass; otherwise only what's needed for a valid paste. A pass that breaks on
+      // some unusual page must never cost the user the native (editable) result.
+      async function run(list, full) {
+        var conv = F2FFigit.createFigmaConverter({ fontLoader: loader, trace: true });
+        var res = await conv.convert(list.length > 1 ? { frames: list, canvasName: canvasName || 'Claude Design' } : list[0]);
+        // Fonts Figma doesn't know by that name (system-ui, sans-serif, Segoe UI…) get the stand-in's name.
+        (function walk(o) {
+          if (!o || typeof o !== 'object' || ArrayBuffer.isView(o)) return;
+          if (typeof o.family === 'string') {
+            var a = FONT_ALIAS[o.family.replace(/['"]/g, '').trim().toLowerCase()];
+            if (a && a[1]) { o.family = a[1]; if ('postscript' in o) o.postscript = ''; }
+          }
+          for (var k in o) if (o[k] && typeof o[k] === 'object') walk(o[k]);
+        })(res.document.nodeChanges);
+        var d = res.document;
+        if (full) {
+          try { attachElements(d, res.trace, list); } catch (e) { console.warn('trace', e); }
+          try { scaleTexts(d); } catch (e) { console.warn('text scale', e); }
+          try { clipScrollers(d); } catch (e) { console.warn('clip', e); }
+          try { rebuildGradients(d, list); } catch (e) { console.warn('gradients', e); }
+          try { tidy(d); } catch (e) { console.warn('tidy', e); }
+          if (useAL) {
+            try { layoutRest(d); } catch (e) { console.warn('layout', e); }
+            try { tidy(d); } catch (e) { console.warn('tidy', e); }
+            try { repairLayouts(d); } catch (e) { console.warn('repair', e); }
+          }
+          try { nameLayers(d); } catch (e) { console.warn('names', e); }
         }
-        for (var k in o) if (o[k] && typeof o[k] === 'object') walk(o[k]);
-      })(res.document.nodeChanges);
-      try { attachElements(res.document, res.trace, frames); } catch (e) { console.warn('trace', e); }
-      try { scaleTexts(res.document); } catch (e) { console.warn('text scale', e); }
-      try { clipScrollers(res.document); } catch (e) { console.warn('clip', e); }
-      try { rebuildGradients(res.document, frames); } catch (e) { console.warn('gradients', e); }
-      tidy(res.document);
-      if (useAL) {
-        try { layoutRest(res.document); } catch (e) { console.warn('layout', e); }
-        tidy(res.document);
-        try { repairLayouts(res.document); } catch (e) { console.warn('repair', e); }
-      } else {
-        // Auto layout switched off: every frame keeps its measured position and size, nothing flows.
-        stripAutoLayout(res.document);
+        if (!useAL) stripAutoLayout(d); // auto layout switched off: fixed positions and sizes, nothing flows
+        d.nodeChanges.forEach(function (n) { Object.keys(n).forEach(function (k) { if (k.indexOf('__') === 0) delete n[k]; }); });
+        var html = F2FFigit.composeClipboardHtml(F2FFigit.encodeFigmaData(d).base64);
+        return { html: html, document: d };
       }
-      try { nameLayers(res.document); } catch (e) { console.warn('names', e); }
-      res.document.nodeChanges.forEach(function (n) { Object.keys(n).forEach(function (k) { if (k.indexOf('__') === 0) delete n[k]; }); });
-      var html = F2FFigit.composeClipboardHtml(F2FFigit.encodeFigmaData(res.document).base64);
-      return { html: html, document: res.document };
+      try { return await run(frames, true); } catch (e) { console.warn('native (full) failed, retrying', e); F2FNative.lastError = e && e.message || String(e); }
+      try { return await run(frames, false); } catch (e) { console.warn('native (plain) failed', e); F2FNative.lastError = e && e.message || String(e); }
+      // Still failing: find the artboard(s) that break it and convert the rest.
+      if (frames.length > 1) {
+        var good = [];
+        for (var i = 0; i < frames.length; i++) {
+          try { await run([frames[i]], false); good.push(frames[i]); } catch (e) { F2FNative.skipped.push(frames[i].name); console.warn('artboard skipped', frames[i].name, e); }
+        }
+        if (good.length) {
+          try { return await run(good, true); } catch (e) {}
+          try { return await run(good, false); } catch (e) { F2FNative.lastError = e && e.message || String(e); }
+        }
+      }
+      throw new Error(F2FNative.lastError || 'native conversion failed');
     }
   };

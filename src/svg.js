@@ -83,11 +83,20 @@
     return ' filter="url(#' + id + ')"';
   };
 
-  Renderer.prototype.frame = function (n) {
+  // Does anything inside stick out of this box? Only then is a clip worth a layer.
+  function overflows(n, box) {
+    return (n.children || []).some(function (c) {
+      if (c.w > 0 && c.h > 0 && (c.x < box.x - 0.5 || c.y < box.y - 0.5 || c.x + c.w > box.x + box.w + 0.5 || c.y + c.h > box.y + box.h + 0.5)) return true;
+      return !c.clip && c.t !== 'text' && c.t !== 'svg' && overflows(c, box);
+    });
+  }
+  Renderer.prototype.frame = function (n, depth, place) {
     var out = '', self = this;
-    var gAttrs = ' id="' + esc(idFor(n.name, this.used)) + '"';
+    depth = depth || 0;
+    var gAttrs = '', tf = place ? [place] : [];
     if (n.opacity !== undefined && n.opacity < 1) gAttrs += ' opacity="' + n2(n.opacity) + '"';
-    if (n.rotation) gAttrs += ' transform="rotate(' + n2(n.rotation) + ' ' + n2(n.x + n.w / 2) + ' ' + n2(n.y + n.h / 2) + ')"';
+    if (n.rotation) tf.push('rotate(' + n2(n.rotation) + ' ' + n2(n.x + n.w / 2) + ' ' + n2(n.y + n.h / 2) + ')');
+    if (tf.length) gAttrs += ' transform="' + tf.join(' ') + '"';
     var body = '';
     var filt = this.effectsFilter(n);
     var fills = n.fills || [];
@@ -114,13 +123,16 @@
         if (w.r) body += '<rect x="' + n2(n.x + n.w - w.r) + '" y="' + n2(n.y) + '" width="' + n2(w.r) + '" height="' + n2(n.h) + '"' + sc + '/>';
       }
     }
-    var kids = (n.children || []).map(function (c) { return self.node(c); }).join('');
-    if (kids && n.clip) {
+    var kids = (n.children || []).map(function (c) { return self.node(c, depth + 1); }).join('');
+    var clipIt = kids && n.clip && overflows(n, n);
+    // A plain wrapper (no paint, no opacity, no clip) adds nothing in Figma: its children go straight to the parent.
+    if (depth > 0 && !body && !gAttrs && !clipIt) return kids;
+    if (clipIt) {
       var clip = 'k' + (uid++);
       this.defs.push('<clipPath id="' + clip + '">' + shape(n, '') + '</clipPath>');
       kids = '<g clip-path="url(#' + clip + ')">' + kids + '</g>';
     }
-    return '<g' + gAttrs + '>' + body + kids + '</g>';
+    return '<g id="' + esc(idFor(n.name, this.used)) + '"' + gAttrs + '>' + body + kids + '</g>';
   };
 
   function caseText(t, c) {
@@ -174,10 +186,10 @@
     return '<g id="' + id + '"' + (n.opacity !== undefined && n.opacity < 1 ? ' opacity="' + n2(n.opacity) + '"' : '') + '>' + inner + '</g>';
   };
 
-  Renderer.prototype.node = function (n) {
+  Renderer.prototype.node = function (n, depth) {
     if (n.t === 'text') return this.text(n);
     if (n.t === 'svg') return this.vector(n);
-    return this.frame(n);
+    return this.frame(n, depth);
   };
 
   // roots: [{ tree, x, y }] placed side by side in one SVG (each becomes a top-level group in Figma)
@@ -187,7 +199,9 @@
       var W = 0, H = 0;
       var body = roots.map(function (o) {
         W = Math.max(W, o.x + o.tree.w); H = Math.max(H, o.y + o.tree.h);
-        return '<g transform="translate(' + n2(o.x) + ' ' + n2(o.y) + ')">' + r.node(o.tree) + '</g>';
+        var place = 'translate(' + n2(o.x) + ' ' + n2(o.y) + ')';
+        if (o.tree.t === 'text' || o.tree.t === 'svg') return '<g transform="' + place + '">' + r.node(o.tree) + '</g>';
+        return r.frame(o.tree, 0, place);
       }).join('');
       return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + n2(W) + '" height="' + n2(H) + '" viewBox="0 0 ' + n2(W) + ' ' + n2(H) + '">' +
         (r.defs.length ? '<defs>' + r.defs.join('') + '</defs>' : '') + body + '</svg>';

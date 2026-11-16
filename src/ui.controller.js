@@ -289,7 +289,8 @@
         $('doneTitle').textContent = 'Ready to paste';
         $('doneSum').textContent = lastFig ? ($('optAL').checked ? 'Copy it, then paste into any Figma file: real frames, auto layout and editable text.' : 'Copy it, then paste into any Figma file: real frames at fixed positions (auto layout off) and editable text.') : 'Copy it, then paste it into any Figma file.';
         if (lastFig) { var mf = Object.keys(F2FNative.missingFonts); if (mf.length) notes += '<div class="note"><b>' + (mf.length === 1 ? 'A font isn’t' : 'Some fonts aren’t') + ' on Google Fonts:</b> ' + mf.map(function (k) { return '“' + esc(k) + '”'; }).join(', ') + '. Text keeps its layout; install the font if Figma shows it as missing.</div>'; }
-        else notes += '<div class="note">This design could only be copied as a flat picture (SVG), so there is no auto layout. Try exporting it from Claude Design as a .zip.</div>';
+        else notes += '<div class="note">This design could only be copied as a flat picture (SVG), so there is no auto layout.' + (window.F2FNative && F2FNative.lastError ? ' Reason: ' + esc(F2FNative.lastError) + '.' : '') + ' Try exporting it from Claude Design as a .zip.</div>';
+        if (lastFig && F2FNative.skipped && F2FNative.skipped.length) notes += '<div class="note"><b>Left out:</b> ' + F2FNative.skipped.map(function (k) { return '“' + esc(k) + '”'; }).join(', ') + ' could not be built as Figma frames. Use the .svg button for ' + (F2FNative.skipped.length === 1 ? 'it' : 'them') + '.</div>';
         show('svgActions', true);
         $('copyLabel').textContent = 'Copy for Figma';
         setStatus('Ready — ' + what + '. Copy it and paste into Figma.', 'ok');
