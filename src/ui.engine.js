@@ -668,6 +668,52 @@
       n.fillPaints = old.filter(function (p) { return !/^GRADIENT_/.test(p.type); }).concat(paints);
     });
   }
+  // Text inside a CSS-scaled box (transform/scale/zoom, e.g. a PDF page shrunk to fit a phone): the converter
+  // measures boxes on screen (already scaled) but takes font-size from computed style (unscaled), so the text
+  // came out too big and wrapped inside its small box. Scale the type to what is actually on screen.
+  function cssScaleOf(el) {
+    var s = 1, d = el.ownerDocument, win = d.defaultView;
+    for (var e = el; e && e.nodeType === 1; e = e.parentElement) {
+      var cs; try { cs = win.getComputedStyle(e); } catch (err) { break; }
+      if (cs.transform && cs.transform !== 'none') {
+        try { var m = new win.DOMMatrix(cs.transform); var det = Math.abs(m.a * m.d - m.b * m.c); if (det > 0) s *= Math.sqrt(det); } catch (err) {}
+      }
+      if (cs.scale && cs.scale !== 'none') {
+        var p = cs.scale.split(/\s+/).map(function (v) { return /%$/.test(v) ? parseFloat(v) / 100 : parseFloat(v); }).filter(function (v) { return isFinite(v); });
+        if (p.length) s *= Math.sqrt(Math.abs(p[0] * (p.length > 1 ? p[1] : p[0])));
+      }
+      var z = parseFloat(cs.zoom); if (isFinite(z) && z > 0 && z !== 1) s *= z;
+    }
+    return s;
+  }
+  var TEXT_KEEP = { advance: 1, rotation: 1, firstCharacter: 1, endCharacter: 1, commandsBlob: 1, styleId: 1, styleID: 1, indentationLevel: 1, listStartOffset: 1, glyphIndex: 1, characterIndex: 1 };
+  function scaleNums(o, s) {
+    if (!o || typeof o !== 'object' || ArrayBuffer.isView(o)) return;
+    for (var k in o) {
+      if (TEXT_KEEP[k]) continue;
+      if (typeof o[k] === 'number') o[k] *= s;
+      else if (o[k] && typeof o[k] === 'object') scaleNums(o[k], s);
+    }
+  }
+  function scaleStyle(st, s) {
+    if (typeof st.fontSize === 'number') st.fontSize *= s;
+    ['lineHeight', 'letterSpacing'].forEach(function (k) { if (st[k] && st[k].units === 'PIXELS' && typeof st[k].value === 'number') st[k].value *= s; });
+    ['paragraphSpacing', 'paragraphIndent', 'textDecorationThickness', 'textUnderlineOffset'].forEach(function (k) { if (typeof st[k] === 'number') st[k] *= s; else if (st[k] && st[k].units === 'PIXELS') st[k].value *= s; });
+  }
+  function scaleTexts(doc) {
+    doc.nodeChanges.forEach(function (n) {
+      if (n.type !== 'TEXT' || !n.__els || !n.__els.length) return;
+      var el = n.__els[0];
+      if (el && el.nodeType === 3) el = el.parentElement;
+      if (!el || el.nodeType !== 1) return;
+      var s = cssScaleOf(el);
+      if (!(s > 0) || Math.abs(s - 1) < 0.01) return;
+      scaleStyle(n, s);
+      var tbl = n.textData && n.textData.styleOverrideTable || n.styleOverrideTable;
+      (tbl || []).forEach(function (st) { scaleStyle(st, s); });
+      if (n.derivedTextData) scaleNums(n.derivedTextData, s);
+    });
+  }
   // Scroll areas that were not unfolded ("Show full page" off, or small ones) keep their content inside.
   function clipScrollers(doc) {
     doc.nodeChanges.forEach(function (n) {
@@ -708,6 +754,7 @@
         for (var k in o) if (o[k] && typeof o[k] === 'object') walk(o[k]);
       })(res.document.nodeChanges);
       try { attachElements(res.document, res.trace, frames); } catch (e) { console.warn('trace', e); }
+      try { scaleTexts(res.document); } catch (e) { console.warn('text scale', e); }
       try { clipScrollers(res.document); } catch (e) { console.warn('clip', e); }
       try { rebuildGradients(res.document, frames); } catch (e) { console.warn('gradients', e); }
       tidy(res.document);
